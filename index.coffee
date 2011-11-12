@@ -1,0 +1,253 @@
+EventEmitter = require('events').EventEmitter
+inflection   = require './libs/inflection'
+Promise      = require './libs/Promise'
+
+isNumber = (n) ->
+  (!isNaN parseFloat n && isFinite n) || typeof n is 'number'
+
+class PassiveRedis
+  constructor: (data, @db=false, @changed={}) ->
+    @prepend = @constructor.name + ':'
+
+    if !@db
+      @db = (require 'redis').createClient()
+
+    Object.keys(@schema).forEach =>
+      name = arguments[0]
+
+      # These are soooo nifty
+      Object.defineProperty @, name, {
+        get: =>
+          if @['get' + (name.charAt(0).toUpperCase() + name.slice(1))]
+            return @['get' + (name.charAt(0).toUpperCase() + name.slice(1))]()
+          else
+            @['_'+name]
+        set: =>
+          if fn = @['set' + (name.charAt(0).toUpperCase() + name.slice(1))]
+            fn arguments[0], (val) =>
+              if @[name] isnt val and typeof @changed[name] is 'undefined'
+                @changed[name] = @[name]
+              Object.defineProperty @, '_'+name, {
+                value: val
+                enumerable: false
+                writable: false
+              }
+          else
+            val = arguments[0]
+            if @[name] isnt arguments[0] and typeof @changed[name] is 'undefined'
+              @changed[name] = @[name]
+
+            Object.defineProperty @, '_'+name, {
+              value: val
+              enumerable: false
+              writable: false
+            }
+
+        enumerable: true
+      }
+
+    if @relationships
+      if @relationships.hasMany
+        proxy = require 'node-proxy'
+
+        Object.keys(@relationships.hasMany).forEach =>
+          name = arguments[0]
+
+          fp = proxy.createFunction {}, =>
+            args = []
+            for i in arguments
+              args.push i
+
+            args.unshift name
+            @doHasMany.apply @, args
+
+          @[name] = fp
+
+      if @relationships.hasOne
+        @relationships.hasOne.forEach =>
+          ev = new EventEmitter()
+          name = arguments[0]
+
+          @__defineGetter__ name, =>
+            @doHasOneFor name, ev
+
+          return ev
+
+    if data
+      Object.keys(data).forEach (key) =>
+        @[key] = data[key]
+
+  save: (fn, force_pointer_update=false) ->
+    # Save the schema values to an object
+    info = {}
+    Object.keys(@schema).forEach =>
+      info[arguments[0]] = @[arguments[0]]
+
+    if @id
+      if @string_id and (@isChanged @[@string_id] or force_pointer_update is true)
+        @updatePointer @changed[@string_id], @[@string_id]
+
+      info.id = @id
+      @db.hmset @prepend + @id, info, (err, data) =>
+        if !err
+          fn.call @, false
+    else
+      @db.incr @prepend + '__incr', (err, data) =>
+        if !err
+          @id = data
+          @save fn, true
+        else
+          fn.call @, true
+
+  updatePointer: (oldVal, newVal) ->
+    @db.del @prepend + oldVal
+    @db.set @prepend + newVal, @id
+
+  doHasOneFor: (name, ev) ->
+    p = new Promise()
+    if @[name+'_id']
+      if @['_'+name]
+        p.value = @['_'+name]
+        p.finished = true
+        return p
+      else
+        key = name.charAt(0).toUpperCase() + name.slice(1) + ':' + @[name+'_id']
+        @db.hgetall key, (err, obj) =>
+          @factory obj, (o) =>
+            @['_'+name] = o
+            p.finish o
+      return p
+    else
+      false
+
+  doHasMany: (type, params, next) ->
+    listKey = @prepend + @id + ':' + type
+    @db.smembers listKey, (err, data) =>
+      if !err then @factory data, type, next else next true
+
+  isChanged: (prop) ->
+    if prop
+      typeof @changed[prop] isnt 'undefined'
+    else
+      !!Object.keys(@changed).length
+
+  hasOne: (type) ->
+    if @[type+'_id'] and @[type+'_id'] isnt false
+      true
+    else
+      false
+
+  @_factory: (obj, type, fn) ->
+    # If we dont' have a callback, then assign one
+    fn = if fn::available then fn else ((err, d) => console.log 'found this object, but didn\'t have a callback', type, (if d.id then '#'+d.id else d))
+
+    # if we get an empty array, return an empty array
+    if obj instanceof Array and !obj.length then return fn false, []
+
+    # if we get a null or false value, return null or false
+    if !obj then return fn false, obj
+
+    results = []
+    if obj instanceof Array
+      obj.forEach (o) =>
+        results.push new global[type] o
+
+      fn false, results
+    else
+      fn false, new global[type] obj
+
+  @_find: (id, f) ->
+    db = (require 'redis').createClient()
+    fn = (e, d) =>
+      db.quit()
+      f e, d
+    fn::available = if f then true else false
+
+    if id instanceof Array
+      results = []
+      len = id.length
+      id.forEach (k) =>
+        doIdLookup = (id) =>
+          if id
+            db.hgetall @name + ':' + k, (err, obj) =>
+              if !err and obj
+                if Object.keys(obj).length then results.push obj
+
+              if !--len
+                @_factory results, @name, fn
+          else
+            if !--len
+              @_factory results, @name, fn
+
+        if isNumber k
+          doIdLookup k
+        else
+          @_findByStringId id, (err, data) =>
+            if !err
+              doIdLookup data
+
+    else if isNumber id
+      # find by numeric key
+      db.hgetall @name + ':' + id, (err, obj) =>
+        if !err
+          if Object.keys(obj).length then @_factory obj, @name, fn
+        else
+          fn true
+    else
+      @_findByStringId id, (err, data) =>
+        if !err
+          @_factory data, @name, fn
+        else
+          fn true
+
+  @_findByStringId: (id, f) ->
+    db = (require 'redis').createClient()
+    fn = (e, d) =>
+      db.quit()
+      f e, d
+    fn::available = if f then true else false
+
+    try
+      # find by string key
+      if global[@name].string_id and str_id = global[@name].string_id
+        db.get @name + ':' + str_id + ':' + id, (err, id) ->
+          if !err
+            if id
+              db.hgetall @name + ':' + id, (err, obj) ->
+                if !err
+                  if obj
+                    fn false, obj
+                  else
+                    fn false, false
+                else
+                  fn true
+            else
+              fn false, false
+          else
+            fn true
+      else
+        fn false, []
+    catch e
+      console.log 'Had a problem loading', @name
+      fn true
+
+  @loadModules: (path, next) ->
+    # If a relative path is passed in
+    if (path.split './').length > 1
+      newPath = __dirname.split('/')
+      newPath.splice(-2,2)
+      path = newPath.join('/') + '/' + (path.split('./')[1])
+
+    fs = require 'fs'
+    fs.readdir path, (err, files) =>
+      models = []
+      files.forEach (file) ->
+        name = file.split('.')[0]
+        models.push require path+ '/' +name
+
+      models.forEach (model) =>
+        global[Object.keys(model)[0]] = model[Object.keys(model)[0]]
+
+      next()
+
+exports.PassiveRedis = PassiveRedis
