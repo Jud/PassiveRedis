@@ -47,7 +47,7 @@ Mailbox.find 2, (err, mailbox) ->
     # Because it is possible that hasOne's will be async, returned
     # values from hasOne are promises, that impliment a `with` method
     mailbox.user.with (user) ->
-      console.log 'Mailbox's user', user
+      console.log 'Mailbox\'s user', user
 
     mailbox.messages (messages) ->
       console.log 'found', messages.length, 'messages'
