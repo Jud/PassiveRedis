@@ -10,6 +10,7 @@ Here is a simple example for creating a User model with PassiveRedis.
 This code should be placed in a directory containing all of the other
 models and the filename should correspond with the class name.
 
+```coffeescript
     PassiveRedis = (require 'PassiveRedis').PassiveRedis
 
     class User extends PassiveRedis
@@ -28,7 +29,7 @@ models and the filename should correspond with the class name.
 
     User.find = PassiveRedis._find
     exports.User = User
-
+```
 
 # License Information
 
