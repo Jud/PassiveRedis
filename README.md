@@ -41,7 +41,7 @@ Usage:
 
 ```coffeescript
 
-mailbox = Mailbox.find 2, (err, mailbox) ->
+Mailbox.find 2, (err, mailbox) ->
   if !err
     # Assumes a hasOne relationship between Mailbox and User
     # Because it is possible that hasOne's will be async, returned
