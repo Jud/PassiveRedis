@@ -1,5 +1,5 @@
 # PassiveRedis
-## A Node ORM for Redis
+A Node ORM for Redis
 
 # License Information
 
