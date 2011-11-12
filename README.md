@@ -11,24 +11,24 @@ This code should be placed in a directory containing all of the other
 models and the filename should correspond with the class name.
 
 ```coffeescript
-    PassiveRedis = (require 'PassiveRedis').PassiveRedis
+PassiveRedis = (require 'PassiveRedis').PassiveRedis
 
-    class User extends PassiveRedis
-      @string_id: 'username'
+class User extends PassiveRedis
+  @string_id: 'username'
 
-      schema:
-        username: 'String'
-        email: 'String'
-        password: 'String'
+  schema:
+    username: 'String'
+    email: 'String'
+    password: 'String'
 
-      relationships:
-        hasMany: {
-          mailboxes: {}
-          messages: {}
-        }
+  relationships:
+    hasMany: {
+      mailboxes: {}
+      messages: {}
+    }
 
-    User.find = PassiveRedis._find
-    exports.User = User
+User.find = PassiveRedis._find
+exports.User = User
 ```
 
 # License Information
