@@ -38,6 +38,7 @@ within the Model class definition. To setup relationships simply create a `relat
 property on the model and define the hasMany and hasOne keys.
 
 Usage:
+
 ```coffeescript
 
 mailbox = Mailbox.find 2, (err, mailbox) ->
