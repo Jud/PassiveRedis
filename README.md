@@ -31,6 +31,37 @@ User.find = PassiveRedis._find
 exports.User = User
 ```
 
+# Relationships (hasMany and hasOne)
+
+PassiveRedis supports hasMany and hasOne relationships that are defined
+within the Model class definition. To setup relationships simply create a `relationships`
+property on the model and define the hasMany and hasOne keys.
+
+Usage:
+```coffeescript
+
+mailbox = Mailbox.find 2, (err, mailbox) ->
+  if !err
+    # Assumes a hasOne relationship between Mailbox and User
+    # Because it is possible that hasOne's will be async, returned
+    # values from hasOne are promises, that impliment a `with` method
+    mailbox.user.with (user) ->
+      console.log 'Mailbox's user', user
+
+    mailbox.messages (messages) ->
+      console.log 'found', messages.length, 'messages'
+```
+
+
+# Getters and Setters
+
+When schema properties are accessed on the model, PassiveRedis
+impliments getters and setters that check for getProperty style methods
+on the model. If "username" was defined in the model schema, and a
+getUsername method was defined on the model, an attempt to access the
+username property would call the getUsername method.
+
+
 # License Information
 
 Copyright (c) 2011 Judson Stephenson
