@@ -1,5 +1,34 @@
-# PassiveRedis
-A Node ORM for Redis
+# PassiveRedis - A Node ORM for Redis
+
+PassiveRedis is an easy way to logically access data stored in a Redis
+datastore. PassiveRedis is based off of the Ruby ORM ActiveRecord,
+though it does not impliment all of its features (yet).
+
+# Making Models With PassiveRedis
+
+Here is a simple example for creating a User model with PassiveRedis.
+This code should be placed in a directory containing all of the other
+models and the filename should correspond with the class name.
+
+  PassiveRedis = (require 'PassiveRedis').PassiveRedis
+
+  class User extends PassiveRedis
+    @string_id: 'username'
+
+    schema:
+      username: 'String'
+      email: 'String'
+      password: 'String'
+
+    relationships:
+      hasMany: {
+        mailboxes: {}
+        messages: {}
+      }
+
+  User.find = PassiveRedis._find
+  exports.User = User
+
 
 # License Information
 
