@@ -1,4 +1,3 @@
-EventEmitter = require('events').EventEmitter
 inflection   = require './libs/inflection'
 Promise      = require './libs/Promise'
 
