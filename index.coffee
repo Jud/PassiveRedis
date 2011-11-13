@@ -104,13 +104,13 @@ class PassiveRedis
 
   doHasOneFor: (name, ev) ->
     p = new Promise()
-    if @[name+'_id']
+    if @[name+'Id']
       if @['_'+name]
         p.value = @['_'+name]
         p.finished = true
         return p
       else
-        key = name.charAt(0).toUpperCase() + name.slice(1) + ':' + @[name+'_id']
+        key = name.charAt(0).toUpperCase() + name.slice(1) + ':' + @[name+'Id']
         @db.hgetall key, (err, obj) =>
           @factory obj, (o) =>
             @['_'+name] = o
@@ -131,7 +131,7 @@ class PassiveRedis
       !!Object.keys(@changed).length
 
   hasOne: (type) ->
-    if @[type+'_id'] and @[type+'_id'] isnt false
+    if @[type+'Id'] and @[type+'Id'] isnt false
       true
     else
       false
