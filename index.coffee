@@ -111,9 +111,10 @@ class PassiveRedis
 
   destroy: (fn) ->
     if @id
-      if @relationships and @relationships.hasMany
-        Object.keys(@relationships.hasMany).forEach =>
-          @db.del @prepend + arguments[0]
+      if @relationships and @relationships.belongsTo
+        Object.keys(@relationships.belongsTo).forEach =>
+          if foreignId = @[(arguments[0].singularize().toLowerCase())+'Id']
+            @db.srem arguments[0].singularize() + foreignId + ':' + @name, @id
 
       @db.del @prepend + @id
       fn.call false
