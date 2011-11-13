@@ -89,14 +89,37 @@ class PassiveRedis
       info.id = @id
       @db.hmset @prepend + @id, info, (err, data) =>
         if !err
-          fn.call @, false
+          fn.call false, @
     else
       @db.incr @prepend + '__incr', (err, data) =>
         if !err
           @id = data
-          @save fn, true
+          f = (err, data) =>
+            if @relationships and @relationships.belongsTo
+              Object.keys(@relationships.belongsTo).forEach =>
+                if foreignId = @[(arguments[0].singularize().toLowerCase())+'Id']
+                  @db.sadd arguments[0].singularize() + foreignId + ':' + @name, @id
+
+            if fn
+              fn err, data
+            else
+              console.log 'No callback, here\'s the data', err, data
+
+          @save f, true
         else
-          fn.call @, true
+          fn.call true, @
+
+  destroy: (fn) ->
+    if @id
+      if @relationships and @relationships.hasMany
+        Object.keys(@relationships.hasMany).forEach =>
+          @db.del @prepend + arguments[0]
+
+      @db.del @prepend + @id
+      fn.call false
+
+    else
+      return fn.call false
 
   updatePointer: (oldVal, newVal) ->
     @db.del @prepend + oldVal
