@@ -11,7 +11,7 @@ class PassiveRedis
     if !@db
       @db = (require 'redis').createClient()
 
-    Object.keys(global[@constructor.name].schema).forEach =>
+    Object.keys(@constructor.schema).forEach =>
       name = arguments[0]
 
       # These are soooo nifty
@@ -45,14 +45,13 @@ class PassiveRedis
         enumerable: true
       }
 
-    if relationships = global[@constructor.name].relationships
-      if relationships.hasMany
-        proxy = require 'node-proxy'
-
-        Object.keys(relationships.hasMany).forEach =>
+    if rel = @constructor.relationships
+      if rel.hasMany
+        node_proxy = require 'node-proxy'
+        Object.keys(rel.hasMany).forEach =>
           name = arguments[0]
 
-          fp = proxy.createFunction {}, =>
+          fp = node_proxy.createFunction {}, =>
             args = []
             for i in arguments
               args.push i
@@ -62,8 +61,8 @@ class PassiveRedis
 
           @[name] = fp
 
-      if relationships.hasOne
-        relationships.hasOne.forEach =>
+      if rel.hasOne
+        rel.hasOne.forEach =>
           ev = new EventEmitter()
           name = arguments[0]
 
@@ -126,28 +125,6 @@ class PassiveRedis
     @db.del @prepend + oldVal
     @db.set @prepend + newVal, @id
 
-  doHasOneFor: (name, ev) ->
-    p = new Promise()
-    if @[name+'Id']
-      if @['_'+name]
-        p.value = @['_'+name]
-        p.finished = true
-        return p
-      else
-        key = name.charAt(0).toUpperCase() + name.slice(1) + ':' + @[name+'Id']
-        @db.hgetall key, (err, obj) =>
-          @factory obj, (o) =>
-            @['_'+name] = o
-            p.finish o
-      return p
-    else
-      false
-
-  doHasMany: (type, params, next) ->
-    listKey = @prepend + @id + ':' + type
-    @db.smembers listKey, (err, data) =>
-      if !err then @factory data, type, next else next true
-
   isChanged: (prop) ->
     if prop
       typeof @changed[prop] isnt 'undefined'
@@ -160,7 +137,30 @@ class PassiveRedis
     else
       false
 
-  @_factory: (obj, type, fn) ->
+  doHasOneFor: (name, ev) ->
+    p = new Promise()
+    if @[name+'Id']
+      if @['_'+name]
+        p.value = @['_'+name]
+        p.finished = true
+        return p
+      else
+        key = name.charAt(0).toUpperCase() + name.slice(1) + ':' + @[name+'Id']
+        @db.hgetall key, (err, obj) =>
+          @constructor.factory obj, name, (o) =>
+            @['_'+name] = o
+            p.finish o
+      return p
+    else
+      false
+
+  doHasMany: (type, params, next) ->
+    listKey = @prepend + @id + ':' + type
+    @db.smembers listKey, (err, data) =>
+      if !err then @constructor.factory data, type, next else next true
+
+  @factory: (obj, type, fn) ->
+    console.log 'factory', obj, type, fn
     # If we dont' have a callback, then assign one
     fn = if fn::available then fn else ((err, d) => console.log 'found this object, but didn\'t have a callback', type, (if d.id then '#'+d.id else d))
 
@@ -179,7 +179,7 @@ class PassiveRedis
     else
       fn false, new global[type] obj
 
-  @_find: (id, f) ->
+  @find: (id, f) ->
     db = (require 'redis').createClient()
     fn = (e, d) =>
       db.quit()
@@ -197,15 +197,15 @@ class PassiveRedis
                 if Object.keys(obj).length then results.push obj
 
               if !--len
-                @_factory results, @name, fn
+                @factory results, @name, fn
           else
             if !--len
-              @_factory results, @name, fn
+              @factory results, @name, fn
 
         if isNumber k
           doIdLookup k
         else
-          @_findByStringId id, (err, data) =>
+          @findByStringId id, (err, data) =>
             if !err
               doIdLookup data
 
@@ -213,17 +213,17 @@ class PassiveRedis
       # find by numeric key
       db.hgetall @name + ':' + id, (err, obj) =>
         if !err
-          if Object.keys(obj).length then @_factory obj, @name, fn
+          @factory obj, @name, fn
         else
           fn true
     else
-      @_findByStringId id, (err, data) =>
+      @findByStringId id, (err, data) =>
         if !err
-          @_factory data, @name, fn
+          @factory data, @name, fn
         else
           fn true
 
-  @_findByStringId: (id, f) ->
+  @findByStringId: (id, f) ->
     db = (require 'redis').createClient()
     fn = (e, d) =>
       db.quit()
@@ -232,7 +232,7 @@ class PassiveRedis
 
     try
       # find by string key
-      if global[@name].string_id and str_id = global[@name].string_id
+      if @string_id and str_id = @string_id
         db.get @name + ':' + str_id + ':' + id, (err, id) ->
           if !err
             if id
