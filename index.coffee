@@ -11,7 +11,7 @@ class PassiveRedis
     if !@db
       @db = (require 'redis').createClient()
 
-    Object.keys(@schema).forEach =>
+    Object.keys(global[@constructor.name].schema).forEach =>
       name = arguments[0]
 
       # These are soooo nifty
@@ -45,11 +45,11 @@ class PassiveRedis
         enumerable: true
       }
 
-    if @relationships
-      if @relationships.hasMany
+    if relationships = global[@constructor.name].relationships
+      if relationships.hasMany
         proxy = require 'node-proxy'
 
-        Object.keys(@relationships.hasMany).forEach =>
+        Object.keys(relationships.hasMany).forEach =>
           name = arguments[0]
 
           fp = proxy.createFunction {}, =>
@@ -62,8 +62,8 @@ class PassiveRedis
 
           @[name] = fp
 
-      if @relationships.hasOne
-        @relationships.hasOne.forEach =>
+      if relationships.hasOne
+        relationships.hasOne.forEach =>
           ev = new EventEmitter()
           name = arguments[0]
 
