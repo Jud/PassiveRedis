@@ -22,10 +22,9 @@ class User extends PassiveRedis
     password: 'String'
 
   @relationships:
-    hasMany: {
+    hasMany:
       mailboxes: {}
       messages: {}
-    }
 
 exports.User = User
 ```
