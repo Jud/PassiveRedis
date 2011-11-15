@@ -2,6 +2,8 @@
   "name" : "PassiveRedis",
   "version" : "0.0.1",
   "description" : "Node ORM for Redis",
+  "homepage" : "https://github.com/Jud/PassiveRedis",
+  "keywords" : [ "ORM", "Redis", "Redis ORM", "Passive", "ActiveRecord" ],
   "author": "Jud Stephenson <Jud@Svpply.com>",
   "main": "./index.coffee",
   "scripts": {

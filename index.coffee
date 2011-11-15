@@ -254,7 +254,7 @@ class PassiveRedis
       console.log 'Had a problem loading', @name
       fn true
 
-  @loadModules: (path, next) ->
+  @loadModels: (path, next) ->
     # If a relative path is passed in
     if (path.split './').length > 1
       newPath = __dirname.split('/')
