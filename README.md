@@ -16,18 +16,17 @@ PassiveRedis = (require 'PassiveRedis').PassiveRedis
 class User extends PassiveRedis
   @string_id: 'username'
 
-  schema:
+  @schema:
     username: 'String'
     email: 'String'
     password: 'String'
 
-  relationships:
+  @relationships:
     hasMany: {
       mailboxes: {}
       messages: {}
     }
 
-User.find = PassiveRedis._find
 exports.User = User
 ```
 
