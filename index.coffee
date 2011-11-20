@@ -14,7 +14,7 @@ class PassiveRedis
     Object.keys(@constructor.schema).forEach =>
       name = arguments[0]
 
-      # These are soooo nifty
+      # Define getters/setters for an object in the schema
       Object.defineProperty @, name, {
         get: =>
           if @['get' + (name.charAt(0).toUpperCase() + name.slice(1))]
@@ -24,7 +24,7 @@ class PassiveRedis
         set: =>
           if fn = @['set' + (name.charAt(0).toUpperCase() + name.slice(1))]
             fn arguments[0], (val) =>
-              if @[name] isnt val and typeof @changed[name] is 'undefined'
+              if @[name] isnt val and !@changed[name]?
                 @changed[name] = @[name]
               Object.defineProperty @, '_'+name, {
                 value: val
@@ -33,7 +33,7 @@ class PassiveRedis
               }
           else
             val = arguments[0]
-            if @[name] isnt arguments[0] and typeof @changed[name] is 'undefined'
+            if @[name] isnt arguments[0] and !@changed[name]?
               @changed[name] = @[name]
 
             Object.defineProperty @, '_'+name, {
@@ -47,11 +47,9 @@ class PassiveRedis
 
     if rel = @constructor.relationships
       if rel.hasMany
-        node_proxy = require 'node-proxy'
         Object.keys(rel.hasMany).forEach =>
           name = arguments[0]
-
-          fp = node_proxy.createFunction {}, =>
+          @[name] = =>
             args = []
             for i in arguments
               args.push i
@@ -59,17 +57,12 @@ class PassiveRedis
             args.unshift name
             @doHasMany.apply @, args
 
-          @[name] = fp
-
       if rel.hasOne
         rel.hasOne.forEach =>
-          ev = new EventEmitter()
           name = arguments[0]
 
-          @__defineGetter__ name, =>
-            @doHasOneFor name, ev
-
-          return ev
+          @[name] = (params, next) =>
+            @doHasOneFor name, params, next
 
     if data
       Object.keys(data).forEach (key) =>
@@ -94,10 +87,7 @@ class PassiveRedis
         if !err
           @id = data
           f = (err, data) =>
-            if @relationships and @relationships.belongsTo
-              Object.keys(@relationships.belongsTo).forEach =>
-                if foreignId = @[(arguments[0].singularize().toLowerCase())+'Id']
-                  @db.sadd arguments[0].singularize() + foreignId + ':' + @name, @id
+            @updateHasMany()
 
             if fn
               fn err, data
@@ -116,18 +106,34 @@ class PassiveRedis
             @db.srem arguments[0].singularize() + foreignId + ':' + @name, @id
 
       @db.del @prepend + @id
-      fn.call false
+      fn()
 
     else
-      return fn.call false
+      return fn()
 
   updatePointer: (oldVal, newVal) ->
     @db.del @prepend + oldVal
     @db.set @prepend + newVal, @id
 
+  updateHasMany: (type, next) ->
+    if @relationships and @relationships.belongsTo
+      len = @relationships.belongsTo.length
+      Object.keys(@relationships.belongsTo).forEach =>
+        if foreignId = @[(arguments[0].singularize().toLowerCase())+'Id']
+          if type is 'add'
+            @db.sadd arguments[0].singularize() + foreignId + ':' + @name, @id, =>
+            if !--len
+              next
+          else
+            @db.srem arguments[0].singularize() + foreignId + ':' + @name, @id, =>
+            if !--len
+              next
+
+
+
   isChanged: (prop) ->
     if prop
-      typeof @changed[prop] isnt 'undefined'
+      !!@changed[prop]?
     else
       !!Object.keys(@changed).length
 
@@ -160,7 +166,6 @@ class PassiveRedis
       if !err then @constructor.factory data, type, next else next true
 
   @factory: (obj, type, fn) ->
-    console.log 'factory', obj, type, fn
     # If we dont' have a callback, then assign one
     fn = if fn::available then fn else ((err, d) => console.log 'found this object, but didn\'t have a callback', type, (if d.id then '#'+d.id else d))
 
@@ -173,86 +178,68 @@ class PassiveRedis
     results = []
     if obj instanceof Array
       obj.forEach (o) =>
-        results.push new global[type] o
+        results.push new @ o
 
       fn false, results
     else
-      fn false, new global[type] obj
+      fn false, new @ obj
 
-  @find: (id, f) ->
-    db = (require 'redis').createClient()
-    fn = (e, d) =>
+  @find: (id, db, fn=false) ->
+    if Object::toString.call(db) is "[object Function]"
+      fn = db
+      db = null
+    if !db
+      db   = (require 'redis').createClient()
+    next = (e, d) =>
       db.quit()
-      f e, d
-    fn::available = if f then true else false
+      fn e, d
+    next::available = if fn then true else false
 
     if id instanceof Array
       results = []
       len = id.length
       id.forEach (k) =>
-        doIdLookup = (id) =>
-          if id
-            db.hgetall @name + ':' + k, (err, obj) =>
-              if !err and obj
-                if Object.keys(obj).length then results.push obj
-
-              if !--len
-                @factory results, @name, fn
-          else
-            if !--len
-              @factory results, @name, fn
-
-        if isNumber k
-          doIdLookup k
-        else
-          @findByStringId id, (err, data) =>
-            if !err
-              doIdLookup data
+        @find k, db, (err, obj) =>
+          if obj
+            results.push obj
+          if !--len then @factory results, @name, next
 
     else if isNumber id
       # find by numeric key
       db.hgetall @name + ':' + id, (err, obj) =>
         if !err
-          @factory obj, @name, fn
-        else
-          fn true
-    else
-      @findByStringId id, (err, data) =>
-        if !err
-          @factory data, @name, fn
-        else
-          fn true
-
-  @findByStringId: (id, f) ->
-    db = (require 'redis').createClient()
-    fn = (e, d) =>
-      db.quit()
-      f e, d
-    fn::available = if f then true else false
-
-    try
-      # find by string key
-      if @string_id and str_id = @string_id
-        db.get @name + ':' + str_id + ':' + id, (err, id) ->
-          if !err
-            if id
-              db.hgetall @name + ':' + id, (err, obj) ->
-                if !err
-                  if obj
-                    fn false, obj
-                  else
-                    fn false, false
-                else
-                  fn true
-            else
-              fn false, false
+          if Object.keys(obj).length
+            @factory obj, @name, next
           else
-            fn true
-      else
-        fn false, []
-    catch e
-      console.log 'Had a problem loading', @name
-      fn true
+            @factory false, @name, next
+        else next true
+    else
+      @findByStringId id, db, (err, data) =>
+        if !err then @factory data, @name, next else next true
+
+  @findByStringId: (id, db, fn) ->
+    db = if !db then (require 'redis').createClient() else db
+    next = (e, d) =>
+      db.quit()
+      fn e, d
+    next::available = if fn then true else false
+
+    # find by string key, maybe we should try to
+    if @string_id and str_id = @string_id
+      db.get @name + ':' + str_id + ':' + id, (err, id) ->
+        if !err
+          if id
+            db.hgetall @name + ':' + id, (err, obj) ->
+              if !err
+                if obj then next false, obj else next false, []
+              else
+                next true
+          else
+            next false, []
+        else
+          next true
+    else
+      next false, []
 
   @loadModels: (path, next) ->
     # If a relative path is passed in
@@ -262,13 +249,13 @@ class PassiveRedis
       path = newPath.join('/') + '/' + (path.split('./')[1])
 
     fs = require 'fs'
-    fs.readdir path, (err, files) =>
+    fs.readdir path, (err, files) ->
       models = []
       files.forEach (file) ->
         name = file.split('.')[0]
         models.push require path+ '/' +name
 
-      models.forEach (model) =>
+      models.forEach (model) ->
         global[Object.keys(model)[0]] = model[Object.keys(model)[0]]
 
       next()
