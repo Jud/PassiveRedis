@@ -38,13 +38,10 @@ property on the model and define the hasMany and hasOne keys.
 Usage:
 
 ```coffeescript
-
 Mailbox.find 2, (err, mailbox) ->
   if !err
     # Assumes a hasOne relationship between Mailbox and User
-    # Because it is possible that hasOne's will be async, returned
-    # values from hasOne are promises, that impliment a `with` method
-    mailbox.user.with (user) ->
+    mailbox.user (user) ->
       console.log 'Mailbox\'s user', user
 
     mailbox.messages (messages) ->
