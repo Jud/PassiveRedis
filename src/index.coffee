@@ -2,7 +2,7 @@ inflection   = require './libs/inflection'
 Promise      = require './libs/Promise'
 
 isNumber = (n) ->
-  (!isNaN parseFloat n && isFinite n) || typeof n is 'number'
+  (!isNaN (parseFloat n) && (isFinite n)) || typeof n is 'number'
 
 class PassiveRedis
   constructor: (data, @db=false, @changed={}) ->

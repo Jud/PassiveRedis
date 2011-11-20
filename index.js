@@ -6,7 +6,7 @@
   Promise = require('./libs/Promise');
 
   isNumber = function(n) {
-    return (!isNaN(parseFloat(n && isFinite(n)))) || typeof n === 'number';
+    return (!isNaN((parseFloat(n)) && (isFinite(n)))) || typeof n === 'number';
   };
 
   PassiveRedis = (function() {
