@@ -91,6 +91,12 @@
       }
     }
 
+    PassiveRedis.prototype.create = function(data, fn) {
+      var obj;
+      obj = new this(data, this.db);
+      return obj.save(fn);
+    };
+
     PassiveRedis.prototype.save = function(fn, force_pointer_update) {
       var info;
       var _this = this;

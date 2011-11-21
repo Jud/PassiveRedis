@@ -68,6 +68,10 @@ class PassiveRedis
       Object.keys(data).forEach (key) =>
         @[key] = data[key]
 
+  create: (data, fn) ->
+    obj = new @ data, @db
+    obj.save fn
+
   save: (fn, force_pointer_update=false) ->
     # Save the schema values to an object
     info = {}
