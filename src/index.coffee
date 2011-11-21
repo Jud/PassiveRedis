@@ -68,10 +68,6 @@ class PassiveRedis
       Object.keys(data).forEach (key) =>
         @[key] = data[key]
 
-  create: (data, fn) ->
-    obj = new @ data, @db
-    obj.save fn
-
   save: (fn, force_pointer_update=false) ->
     # Save the schema values to an object
     info = {}
@@ -168,6 +164,10 @@ class PassiveRedis
     listKey = @prepend + @id + ':' + type
     @db.smembers listKey, (err, data) =>
       if !err then @constructor.factory data, type, next else next true
+
+  @create: (data, fn) ->
+    obj = new @ data
+    obj.save fn
 
   @factory: (obj, type, fn) ->
     # If we dont' have a callback, then assign one
