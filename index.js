@@ -12,8 +12,8 @@
   PassiveRedis = (function() {
 
     function PassiveRedis(data, db, changed) {
-      var rel;
-      var _this = this;
+      var rel,
+        _this = this;
       this.db = db != null ? db : false;
       this.changed = changed != null ? changed : {};
       this.prepend = this.constructor.name + ':';
@@ -30,7 +30,7 @@
             }
           },
           set: function() {
-            var fn, val;
+            var fn;
             if (fn = _this['set' + (name.charAt(0).toUpperCase() + name.slice(1))]) {
               return fn(arguments[0], function(val) {
                 if (_this[name] !== val && !(_this.changed[name] != null)) {
@@ -43,12 +43,11 @@
                 });
               });
             } else {
-              val = arguments[0];
               if (_this[name] !== arguments[0] && !(_this.changed[name] != null)) {
                 _this.changed[name] = _this[name];
               }
               return Object.defineProperty(_this, '_' + name, {
-                value: val,
+                value: arguments[0],
                 enumerable: false,
                 writable: false
               });
@@ -79,7 +78,7 @@
             var name;
             name = arguments[0];
             return _this[name] = function(params, next) {
-              return _this.doHasOneFor(name, params, next);
+              return _this.doHasOneFor(name, next);
             };
           });
         }
@@ -92,47 +91,87 @@
     }
 
     PassiveRedis.prototype.save = function(fn, force_pointer_update) {
-      var info;
-      var _this = this;
+      var do_save, do_update, error, info, _ref, _ref2,
+        _this = this;
       if (force_pointer_update == null) force_pointer_update = false;
       info = {};
-      Object.keys(this.schema).forEach(function() {
-        return info[arguments[0]] = _this[arguments[0]];
-      });
+      error = false;
       if (this.id) {
-        if (this.string_id && (this.isChanged(this[this.string_id] || force_pointer_update === true))) {
-          this.updatePointer(this.changed[this.string_id], this[this.string_id]);
-        }
-        info.id = this.id;
-        return this.db.hmset(this.prepend + this.id, info, function(err, data) {
-          if (!err) return fn.call(false, _this);
-        });
-      } else {
-        return this.db.incr(this.prepend + '__incr', function(err, data) {
-          var f;
+        do_update = function(err) {
+          Object.keys(_this.constructor.schema).forEach(function() {
+            if (_this.constructor.schema[arguments[0]].required && !_this[arguments[0]]) {
+              return error = true;
+            } else {
+              return info[arguments[0]] = _this[arguments[0]];
+            }
+          });
+          if (error) return fn(true);
           if (!err) {
-            _this.id = data;
-            f = function(err, data) {
-              _this.updateHasMany();
-              if (fn) {
-                return fn(err, data);
-              } else {
-                return console.log('No callback, here\'s the data', err, data);
-              }
-            };
-            return _this.save(f, true);
+            if (_this.constructor.stringId && (_this.isChanged(_this[_this.constructor.stringId] || (force_pointer_update === true && _this.constructor.stringId)))) {
+              _this.updatePointer(_this.changed[_this.constructor.stringId], _this[_this.constructor.stringId]);
+            }
+            info.id = _this.id;
+            return _this.db.hmset(_this.prepend + _this.id, info, function(err, data) {
+              if (!err) return fn(false, _this);
+            });
           } else {
-            return fn.call(true, _this);
+            return fn(true);
           }
-        });
+        };
+        if ((_ref = this.constructor.actions) != null ? _ref.beforeUpdate : void 0) {
+          return this.constructor.actions.beforeUpdate.call(this, function(err) {
+            return do_update(err);
+          });
+        } else {
+          return do_update(false);
+        }
+      } else {
+        do_save = function(err) {
+          Object.keys(_this.constructor.schema).forEach(function() {
+            if (_this.constructor.schema[arguments[0]].required && !_this[arguments[0]]) {
+              return error = true;
+            } else {
+              return info[arguments[0]] = _this[arguments[0]];
+            }
+          });
+          if (error) return fn(true);
+          if (!err) {
+            return _this.db.incr(_this.prepend + '__incr', function(err, data) {
+              var f;
+              if (!err) {
+                _this.id = data;
+                f = function(err, data) {
+                  _this.updateHasMany();
+                  if (fn) {
+                    return fn(err, data);
+                  } else {
+                    return console.log('No callback, here\'s the data', err, data);
+                  }
+                };
+                return _this.save(f, true);
+              } else {
+                return fn(true, _this);
+              }
+            });
+          } else {
+            return fn(true, _this);
+          }
+        };
+        if ((_ref2 = this.constructor.actions) != null ? _ref2.beforeSave : void 0) {
+          return this.constructor.actions.beforeSave.call(this, function(err) {
+            return do_save(err);
+          });
+        } else {
+          return do_save(false);
+        }
       }
     };
 
     PassiveRedis.prototype.destroy = function(fn) {
       var _this = this;
       if (this.id) {
-        if (this.relationships && this.relationships.belongsTo) {
-          Object.keys(this.relationships.belongsTo).forEach(function() {
+        if (this.constructor.relationships && this.constructor.relationships.belongsTo) {
+          Object.keys(this.constructor.relationships.belongsTo).forEach(function() {
             var foreignId;
             if (foreignId = _this[(arguments[0].singularize().toLowerCase()) + 'Id']) {
               return _this.db.srem(arguments[0].singularize() + foreignId + ':' + _this.name, _this.id);
@@ -152,11 +191,11 @@
     };
 
     PassiveRedis.prototype.updateHasMany = function(type, next) {
-      var len;
-      var _this = this;
-      if (this.relationships && this.relationships.belongsTo) {
-        len = this.relationships.belongsTo.length;
-        return Object.keys(this.relationships.belongsTo).forEach(function() {
+      var len,
+        _this = this;
+      if (this.constructor.relationships && this.constructor.relationships.belongsTo) {
+        len = this.constructor.relationships.belongsTo.length;
+        return Object.keys(this.constructor.relationships.belongsTo).forEach(function() {
           var foreignId;
           if (foreignId = _this[(arguments[0].singularize().toLowerCase()) + 'Id']) {
             if (type === 'add') {
@@ -180,40 +219,34 @@
     };
 
     PassiveRedis.prototype.hasOne = function(type) {
-      if (this[type + 'Id'] && this[type + 'Id'] !== false) {
-        return true;
-      } else {
-        return false;
-      }
+      return this[type + 'Id'] && this[type + 'Id'] !== false;
     };
 
-    PassiveRedis.prototype.doHasOneFor = function(name, ev) {
-      var key, p;
-      var _this = this;
-      p = new Promise();
+    PassiveRedis.prototype.doHasOneFor = function(name, next) {
+      var key,
+        _this = this;
       if (this[name + 'Id']) {
         if (this['_' + name]) {
-          p.value = this['_' + name];
-          p.finished = true;
-          return p;
+          return next(false, this['_' + name]);
         } else {
           key = name.charAt(0).toUpperCase() + name.slice(1) + ':' + this[name + 'Id'];
-          this.db.hgetall(key, function(err, obj) {
-            return _this.constructor.factory(obj, name, function(o) {
-              _this['_' + name] = o;
-              return p.finish(o);
-            });
+          return this.db.hgetall(key, function(err, obj) {
+            if (!err) {
+              return _this.constructor.factory(obj, name, function(o) {
+                _this['_' + name] = o;
+                return next(false, o);
+              });
+            }
           });
         }
-        return p;
       } else {
-        return false;
+        return next(true);
       }
     };
 
     PassiveRedis.prototype.doHasMany = function(type, params, next) {
-      var listKey;
-      var _this = this;
+      var listKey,
+        _this = this;
       listKey = this.prepend + this.id + ':' + type;
       return this.db.smembers(listKey, function(err, data) {
         if (!err) {
@@ -225,14 +258,12 @@
     };
 
     PassiveRedis.create = function(data, fn) {
-      var obj;
-      obj = new this(data);
-      return obj.save(fn);
+      return (new this(data)).save(fn);
     };
 
     PassiveRedis.factory = function(obj, type, fn) {
-      var results;
-      var _this = this;
+      var results,
+        _this = this;
       fn = fn.prototype.available ? fn : (function(err, d) {
         return console.log('found this object, but didn\'t have a callback', type, (d.id ? '#' + d.id : d));
       });
@@ -250,8 +281,8 @@
     };
 
     PassiveRedis.find = function(id, db, fn) {
-      var len, next, results;
-      var _this = this;
+      var len, next, results,
+        _this = this;
       if (fn == null) fn = false;
       if (Object.prototype.toString.call(db) === "[object Function]") {
         fn = db;
@@ -260,9 +291,9 @@
       if (!db) db = (require('redis')).createClient();
       next = function(e, d) {
         db.quit();
-        return fn(e, d);
+        if (!!fn) return fn(e, d);
       };
-      next.prototype.available = fn ? true : false;
+      next.prototype.available = !!fn || false;
       if (id instanceof Array) {
         results = [];
         len = id.length;
@@ -287,7 +318,7 @@
       } else {
         return this.findByStringId(id, db, function(err, data) {
           if (!err) {
-            return _this.factory(data, _this.name, next);
+            return next(false, data);
           } else {
             return next(true);
           }
@@ -296,47 +327,40 @@
     };
 
     PassiveRedis.findByStringId = function(id, db, fn) {
-      var next, str_id;
-      var _this = this;
+      var next, str_id,
+        _this = this;
       db = !db ? (require('redis')).createClient() : db;
       next = function(e, d) {
         db.quit();
-        return fn(e, d);
+        if (fn) return fn(e, d);
       };
-      next.prototype.available = fn ? true : false;
+      next.prototype.available = !!fn || false;
       if (this.string_id && (str_id = this.string_id)) {
         return db.get(this.name + ':' + str_id + ':' + id, function(err, id) {
           if (!err) {
             if (id) {
-              return db.hgetall(this.name + ':' + id, function(err, obj) {
-                if (!err) {
-                  if (obj) {
-                    return next(false, obj);
-                  } else {
-                    return next(false, []);
-                  }
-                } else {
-                  return next(true);
-                }
+              return this.find(id, db, function(err, obj) {
+                if (!err) return this.factory(obj, this.name, next);
               });
             } else {
-              return next(false, []);
+              return next(false, false);
             }
           } else {
             return next(true);
           }
         });
       } else {
-        return next(false, []);
+        return next(false, false);
       }
     };
 
     PassiveRedis.loadModels = function(path, next) {
-      var fs, newPath;
+      var fs;
+      if ((path.split('../')).length > 1) {
+        path = (((__dirname.split('/')).slice(0, -1)).join('/')) + '/' + path.split('./')[1];
+      }
       if ((path.split('./')).length > 1) {
-        newPath = __dirname.split('/');
-        newPath.splice(-2, 2);
-        path = newPath.join('/') + '/' + (path.split('./')[1]);
+        path = __dirname + '/' + path.split('./')[1];
       }
       fs = require('fs');
       return fs.readdir(path, function(err, files) {
@@ -344,7 +368,7 @@
         models = [];
         files.forEach(function(file) {
           var name;
-          name = file.split('.')[0];
+          name = file.split('.')[0].charAt(0).toUpperCase() + file.split('.')[0].slice(1);
           return models.push(require(path + '/' + name));
         });
         models.forEach(function(model) {
