@@ -1,5 +1,4 @@
 inflection   = require './libs/inflection'
-Promise      = require './libs/Promise'
 
 ## isNumber - The missing js is_numeric.
 # This is used in our find method to determine if someone is looking
@@ -114,7 +113,12 @@ class PassiveRedis
         if error then return fn true
 
         if !err
-          if @constructor.stringId and (@isChanged @[@constructor.stringId] or (force_pointer_update is true and @constructor.stringId)) then @updatePointer @changed[@constructor.stringId], @[@constructor.stringId]
+          # Update the StringId and other pointers
+          if @constructor.stringId and (@isChanged @[@constructor.stringId] or (force_pointer_update is true and @constructor.stringId)) then @updatePointer @constructor.stringId, @changed[@constructor.stringId], @[@constructor.stringId]
+          if pointers = @constructor.pointers
+            Object.keys(pointers).forEach (key) =>
+              if @isChanged @[field] or (force_pointer_update is true) then @updatePointer key, @changed[field], @[field], !!pointers[key]?.unique
+
           info.id = @id
           @db.hmset @prepend + @id, info, (err, data) =>
             if !err then fn false, @
@@ -154,47 +158,46 @@ class PassiveRedis
 
   # Destroy the instance. This method also cleans up any pointer references
   # that may have been accumulated.
-  destroy: (fn) ->
+  destroy: (next) ->
     if @id
-      if @constructor.relationships and @constructor.relationships.belongsTo
-        Object.keys(@constructor.relationships.belongsTo).forEach =>
-          if foreignId = @[(arguments[0].singularize().toLowerCase())+'Id']
-            @db.srem arguments[0].singularize() + foreignId + ':' + @name, @id
-
-      @db.del @prepend + @id
-      fn()
-
+      @updateHasMany 'rem', =>
+        @db.del @prepend + @id
+        next()
     else
-      return fn()
+      return next()
 
   # Update entries that allow us to search for objects by other unique id's,
   # such as the stringId.
-  updatePointer: (oldVal, newVal) ->
-    @db.del @prepend + oldVal
-    @db.set @prepend + newVal, @id
+  updatePointers: (name, oldVal, newVal, unique=true) ->
+    if oldVal isnt undefined
+      if unique
+        @db.del @prepend + name + ':' + oldVal
+        @db.set @prepend + name + ':' + newVal, @id
+      else
+        @db.lrem @prepend + name + ':' + oldVal, 0, @id
+        @db.lpush @prepend + name + ':' + newVal, @id
 
   # If a model has a belongsTo relationship, then we should update the list
   # of hasMany items it is a part of.
   updateHasMany: (type, next) ->
-    if @constructor.relationships and @constructor.relationships.belongsTo
-      len = @constructor.relationships.belongsTo.length
+    if len = @constructor.relationships?.belongsTo?.length
       Object.keys(@constructor.relationships.belongsTo).forEach =>
         if foreignId = @[(arguments[0].singularize().toLowerCase())+'Id']
           if type is 'add'
-            @db.sadd arguments[0].singularize() + foreignId + ':' + @name, @id, =>
+            @db.lpush arguments[0].singularize() + foreignId + ':' + @name, @id, =>
             if !--len
-              next
-          else
-            @db.srem arguments[0].singularize() + foreignId + ':' + @name, @id, =>
+              next()
+          else if type is 'rem'
+            @db.lrem arguments[0].singularize() + foreignId + ':' + @name, 0, @id, =>
             if !--len
-              next
+              next()
 
   # This is used to keep track of the schema values that have been changed
   # after the model was initialized. Either pass in a property string or
   # leave blank to see if the model has changed.
   isChanged: (prop) ->
     if prop
-      !!@changed[prop]?
+      @changed.hasOwnProperty prop
     else
       !!Object.keys(@changed).length
 
@@ -299,12 +302,20 @@ class PassiveRedis
 
     # If all else fails, find by the stringId.
     else
-      @findByStringId id, db, (err, data) =>
+      @_findByPointer @stringId, true, id, db, (err, data) =>
         if !err then return next false, data else return next true
 
-  # Find objects by their stringId
-  @findByStringId: (id, db, fn) ->
+  # Find a model by another unique key, which we will call a pointer to
+  # the model's id.
+  @_findByPointer: (name, value, db, fn=false) ->
+    # If the db parameter is omitted, then the callback function is
+    # actually the db variable.
+    if Object::toString.call(db) is "[object Function]"
+      fn = db
+      db = null
+
     db = if !db then (require 'redis').createClient() else db
+    unique = @pointers[key]?.unique or false
 
     # Set up the next function to automatically close the db connection
     # when it is invoked.
@@ -315,15 +326,14 @@ class PassiveRedis
     # This is used to determine if `fn` is defined within its creating closure.
     next::available = !!fn or false
 
-    # find by string key, maybe we should try to
-    if @string_id and str_id = @string_id
-      db.get @name + ':' + str_id + ':' + id, (err, id) ->
+    if !unique
+      db.get @name + ':' + name + ':' + @[name], (err, id) =>
         # If there was no error
         if !err
           # If an id exists
           if id
             # Then find by the id!
-            @find id, db, (err, obj) ->
+            @find id, db, (err, obj) =>
               if !err then @factory obj, @name, next
           else
             # There isn't a pointer defined for this object, so we can't figure
@@ -333,31 +343,35 @@ class PassiveRedis
           # An error occurred trying to fetch from the db.
           next true
     else
-      # This model doesn't define a stringId, so this can't exist.
-      next false, false
+      # Return all of the items on the list
+      db.lrange @name + ':' + name + ':' + @[name], 0, -1, (err, data) =>
+        if !err
+          if data
+            @find data, db, (err, obj) =>
+              if !err then @factory obj, @name, next
+          else
+            next false, false
+        else
+          next true
 
   # Because of the way PassiveRedis dynamically instantiates models based on
   # the calling class, the model definitions must be defined within the global
   # scope, otherwise dynamic name construction won't work. This method loads
   # the classes into the global scope.
-  @loadModels: (path, next) ->
+  @loadModels: (models, next) ->
     # If a relative path is passed in
-    if (path.split '../').length > 1 then path = (((__dirname.split '/').slice 0, -1).join '/') + '/' + path.split('./')[1]
-    if (path.split './').length > 1 then path = __dirname + '/' + path.split('./')[1]
+    if models
+      Object.keys(models).forEach (name) =>
+        if pointers = models[name]?.pointers
+          # Setup the pointers to this object that are defined in the model.
+          # Secondary indexes might also be a good name.
+          Object.keys(pointers).forEach (key) =>
+            models[name]['findBy' + (key.charAt(0).toUpperCase() + key.slice(1))] = (value, fn) ->
+              @_findByPointer key, value, fn
 
-    fs = require 'fs'
+        global[name] = models[name]
 
-    # Iterate over the directory that we have specified
-    fs.readdir path, (err, files) ->
-      models = []
-      files.forEach (file) ->
-        name = file.split('.')[0].charAt(0).toUpperCase() + file.split('.')[0].slice(1)
-        models.push require path+ '/' +name
-
-      models.forEach (model) ->
-        global[Object.keys(model)[0]] = model[Object.keys(model)[0]]
-
-      next()
+    next()
 
 # Export the module
-exports.PassiveRedis = PassiveRedis
+module.exports = PassiveRedis
