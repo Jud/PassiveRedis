@@ -9,13 +9,32 @@ isNumber = function(n) {
 PassiveRedis = (function() {
 
   function PassiveRedis(data, db, changed) {
-    var rel,
+    var keys, len, objProperties, rel,
       _this = this;
     this.db = db != null ? db : false;
     this.changed = changed != null ? changed : {};
-    this.prepend = this.constructor.name + ':';
-    if (!this.db) this.db = (require('redis')).createClient();
-    Object.keys(this.constructor.schema).forEach(function() {
+    Object.defineProperty(this, 'prepend', {
+      value: this.constructor.name + ':',
+      enumerable: false,
+      writable: true
+    });
+    Object.defineProperty(this, '__constructed', {
+      value: data.id ? false : true,
+      enumerable: false,
+      writable: true
+    });
+    Object.defineProperty(this, 'passive', {
+      value: {
+        beforeUpdate: [],
+        beforeSave: [],
+        afterSave: []
+      },
+      enumerable: false,
+      writable: true
+    });
+    objProperties = Object.keys(this.constructor.schema);
+    objProperties.push('db');
+    objProperties.forEach(function() {
       var name;
       name = arguments[0];
       return Object.defineProperty(_this, name, {
@@ -23,30 +42,40 @@ PassiveRedis = (function() {
           if (_this['get' + (name.charAt(0).toUpperCase() + name.slice(1))]) {
             return _this['get' + (name.charAt(0).toUpperCase() + name.slice(1))]();
           } else {
-            return _this['_' + name];
+            return _this['___' + name];
           }
         },
         set: function() {
           var fn;
           if (fn = _this['set' + (name.charAt(0).toUpperCase() + name.slice(1))]) {
-            return fn(arguments[0], function(val) {
-              if (_this[name] !== val && !(_this.changed[name] != null)) {
-                _this.changed[name] = _this[name];
-              }
-              return Object.defineProperty(_this, '_' + name, {
-                value: val,
+            if (_this.isConstructed()) {
+              return fn.apply(_this, [
+                arguments[0], function(val) {
+                  if (_this[name] !== val && !(_this.changed.hasOwnProperty(name))) {
+                    _this.changed[name] = _this[name];
+                  }
+                  return Object.defineProperty(_this, '___' + name, {
+                    value: val,
+                    enumerable: false,
+                    writable: true
+                  });
+                }
+              ]);
+            } else {
+              return Object.defineProperty(_this, '___' + name, {
+                value: arguments[0],
                 enumerable: false,
-                writable: false
+                writable: true
               });
-            });
+            }
           } else {
-            if (_this[name] !== arguments[0] && !(_this.changed[name] != null)) {
+            if (_this.isConstructed() && _this[name] !== arguments[0] && !_this.changed.hasOwnProperty(name)) {
               _this.changed[name] = _this[name];
             }
-            return Object.defineProperty(_this, '_' + name, {
+            return Object.defineProperty(_this, '___' + name, {
               value: arguments[0],
               enumerable: false,
-              writable: false
+              writable: true
             });
           }
         },
@@ -59,36 +88,59 @@ PassiveRedis = (function() {
           var name;
           name = arguments[0];
           return _this[name] = function() {
-            var args, i, _i, _len;
+            var args, fn, key, value, _len;
             args = [];
-            for (_i = 0, _len = arguments.length; _i < _len; _i++) {
-              i = arguments[_i];
-              args.push(i);
+            fn = arguments[arguments.length - 1];
+            for (value = 0, _len = arguments.length; value < _len; value++) {
+              key = arguments[value];
+              if (key < arguments.length - 1) args.push(i);
             }
-            args.unshift(name);
-            return _this.doHasMany.apply(_this, args);
+            return _this.doHasMany.apply(_this, [name, args, fn]);
           };
         });
       }
       if (rel.hasOne) {
-        rel.hasOne.forEach(function() {
+        Object.keys(rel.hasOne).forEach(function() {
           var name;
           name = arguments[0];
-          return _this[name] = function(params, next) {
+          return _this[name] = function(next) {
+            return _this.doHasOneFor(name, next);
+          };
+        });
+      }
+      if (rel.belongsTo) {
+        Object.keys(rel.belongsTo).forEach(function() {
+          var name;
+          name = arguments[0];
+          return _this[name] = function(next) {
             return _this.doHasOneFor(name, next);
           };
         });
       }
     }
     if (data) {
-      Object.keys(data).forEach(function(key) {
-        return _this[key] = data[key];
+      len = Object.keys(data).length;
+      keys = Object.keys(data);
+      keys.forEach(function(key) {
+        _this[key] = data[key];
+        if (!--len) return _this.__constructed = true;
       });
+    } else {
+      this.__constructed = true;
     }
   }
 
+  PassiveRedis.prototype.isConstructed = function() {
+    return !!this.__constructed;
+  };
+
+  PassiveRedis.prototype.getDb = function() {
+    if (!this._db) this._db = (require('redis')).createClient();
+    return this._db;
+  };
+
   PassiveRedis.prototype.save = function(fn, force_pointer_update) {
-    var do_save, do_update, error, info, _ref, _ref2,
+    var closure, do_save, do_update, error, info, _ref, _ref2, _ref3, _ref4, _results, _results2,
       _this = this;
     if (force_pointer_update == null) force_pointer_update = false;
     info = {};
@@ -98,26 +150,34 @@ PassiveRedis = (function() {
         var pointers;
         Object.keys(_this.constructor.schema).forEach(function() {
           if (_this.constructor.schema[arguments[0]].required && !_this[arguments[0]]) {
-            return error = true;
+            error = true;
           } else {
-            return info[arguments[0]] = _this[arguments[0]];
+            info[arguments[0]] = _this[arguments[0]];
+          }
+          if (!_this.constructor.schema[arguments[0]].required && !_this[arguments[0]] && !_this.constructor.schema[arguments[0]].hasOwnProperty('default')) {
+            return info[arguments[0]] = _this.constructor.schema[arguments[0]]["default"];
           }
         });
         if (error) return fn(true);
         if (!err) {
-          if (_this.constructor.stringId && (_this.isChanged(_this[_this.constructor.stringId] || (force_pointer_update === true && _this.constructor.stringId)))) {
-            _this.updatePointer(_this.constructor.stringId, _this.changed[_this.constructor.stringId], _this[_this.constructor.stringId]);
+          if (_this.constructor.stringId && (_this.isChanged(_this.constructor.stringId || force_pointer_update === true))) {
+            _this.updatePointers(_this.constructor.stringId, _this.changed[_this.constructor.stringId], _this[_this.constructor.stringId]);
           }
           if (pointers = _this.constructor.pointers) {
             Object.keys(pointers).forEach(function(key) {
               var _ref;
-              if (_this.isChanged(_this[field] || (force_pointer_update === true))) {
-                return _this.updatePointer(key, _this.changed[field], _this[field], !!((_ref = pointers[key]) != null ? _ref.unique : void 0));
+              if (_this[key] !== false) {
+                if ((_this.isChanged(_this[key])) || (force_pointer_update === true)) {
+                  return _this.updatePointers(key, _this.changed[key], _this[key], !!((_ref = pointers[key]) != null ? _ref.unique : void 0));
+                }
               }
             });
           }
           info.id = _this.id;
           return _this.db.hmset(_this.prepend + _this.id, info, function(err, data) {
+            _this.db.quit(function() {
+              return delete _this.db;
+            });
             if (!err) return fn(false, _this);
           });
         } else {
@@ -125,25 +185,46 @@ PassiveRedis = (function() {
         }
       };
       if ((_ref = this.constructor.actions) != null ? _ref.beforeUpdate : void 0) {
-        return this.constructor.actions.beforeUpdate.call(this, function(err) {
-          return do_update(err);
-        });
-      } else {
+        this.passive.beforeUpdate.push((_ref2 = this.constructor.actions) != null ? _ref2.beforeUpdate : void 0);
+      }
+      error = false;
+      if (!this.passive.beforeUpdate.length) {
         return do_update(false);
+      } else {
+        _results = [];
+        while (this.passive.beforeUpdate.length) {
+          closure = this.passive.beforeUpdate.pop();
+          if (!error) {
+            _results.push(closure.call(this, function(err) {
+              if (!err) {
+                if (!_this.passive.beforeUpdate.length) return do_update(false);
+              } else {
+                error = true;
+                return do_update(true);
+              }
+            }));
+          } else {
+            _results.push(void 0);
+          }
+        }
+        return _results;
       }
     } else {
       do_save = function(err) {
         Object.keys(_this.constructor.schema).forEach(function() {
           if (_this.constructor.schema[arguments[0]].required && !_this[arguments[0]]) {
-            return error = true;
+            error = true;
           } else {
-            return info[arguments[0]] = _this[arguments[0]];
+            info[arguments[0]] = _this[arguments[0]];
+          }
+          if (!_this.constructor.schema[arguments[0]].required && !_this[arguments[0]] && !_this.constructor.schema[arguments[0]].hasOwnProperty('default')) {
+            return info[arguments[0]] = _this.constructor.schema[arguments[0]]["default"];
           }
         });
         if (error) return fn(true);
         if (!err) {
           return _this.db.incr(_this.prepend + '__incr', function(err, data) {
-            var f;
+            var f, _ref3, _ref4, _results2;
             if (!err) {
               _this.id = data;
               f = function(err, data) {
@@ -154,7 +235,28 @@ PassiveRedis = (function() {
                   return console.log('No callback, here\'s the data', err, data);
                 }
               };
-              return _this.save(f, true);
+              if ((_ref3 = _this.constructor.actions) != null ? _ref3.afterSave : void 0) {
+                _this.passive.afterSave.push((_ref4 = _this.constructor.actions) != null ? _ref4.afterSave : void 0);
+              }
+              error = false;
+              if (!_this.passive.afterSave.length) {
+                return _this.save(f, true);
+              } else {
+                _results2 = [];
+                while (_this.passive.afterSave.length) {
+                  closure = _this.passive.afterSave.pop();
+                  if (!error) {
+                    _results2.push(closure.call(_this, function() {
+                      if (!_this.passive.afterSave.length) {
+                        return _this.save(f, true);
+                      }
+                    }));
+                  } else {
+                    _results2.push(void 0);
+                  }
+                }
+                return _results2;
+              }
             } else {
               return fn(true, _this);
             }
@@ -163,12 +265,30 @@ PassiveRedis = (function() {
           return fn(true, _this);
         }
       };
-      if ((_ref2 = this.constructor.actions) != null ? _ref2.beforeSave : void 0) {
-        return this.constructor.actions.beforeSave.call(this, function(err) {
-          return do_save(err);
-        });
-      } else {
+      if ((_ref3 = this.constructor.actions) != null ? _ref3.beforeSave : void 0) {
+        this.passive.beforeSave.push((_ref4 = this.constructor.actions) != null ? _ref4.beforeSave : void 0);
+      }
+      error = false;
+      if (!this.passive.beforeSave.length) {
         return do_save(false);
+      } else {
+        _results2 = [];
+        while (this.passive.beforeSave.length) {
+          closure = this.passive.beforeSave.pop();
+          if (!error) {
+            _results2.push(closure.call(this, function(err) {
+              if (!err) {
+                if (!_this.passive.beforeSave.length) return do_save(false);
+              } else {
+                error = true;
+                return do_save(true);
+              }
+            }));
+          } else {
+            _results2.push(void 0);
+          }
+        }
+        return _results2;
       }
     }
   };
@@ -178,6 +298,9 @@ PassiveRedis = (function() {
     if (this.id) {
       return this.updateHasMany('rem', function() {
         _this.db.del(_this.prepend + _this.id);
+        _this.db.quit(function() {
+          return delete _this.db;
+        });
         return next();
       });
     } else {
@@ -187,14 +310,12 @@ PassiveRedis = (function() {
 
   PassiveRedis.prototype.updatePointers = function(name, oldVal, newVal, unique) {
     if (unique == null) unique = true;
-    if (oldVal !== void 0) {
-      if (unique) {
-        this.db.del(this.prepend + name + ':' + oldVal);
-        return this.db.set(this.prepend + name + ':' + newVal, this.id);
-      } else {
-        this.db.lrem(this.prepend + name + ':' + oldVal, 0, this.id);
-        return this.db.lpush(this.prepend + name + ':' + newVal, this.id);
-      }
+    if (unique) {
+      this.db.del(this.prepend + name + ':' + oldVal);
+      return this.db.set(this.prepend + name + ':' + newVal, this.id);
+    } else {
+      this.db.lrem(this.prepend + name + ':' + oldVal, 0, this.id);
+      return this.db.lpush(this.prepend + name + ':' + newVal, this.id);
     }
   };
 
@@ -238,12 +359,16 @@ PassiveRedis = (function() {
       } else {
         key = name.charAt(0).toUpperCase() + name.slice(1) + ':' + this[name + 'Id'];
         return this.db.hgetall(key, function(err, obj) {
-          if (!err) {
-            return _this.constructor.factory(obj, name, function(o) {
-              _this['_' + name] = o;
-              return next(false, o);
-            });
-          }
+          var fn;
+          _this.db.quit(function() {
+            return delete _this.db;
+          });
+          fn = function(o) {
+            this['_' + name] = o;
+            return next(false, o);
+          };
+          fn.prototype.available = true;
+          if (!err) return _this.constructor.factory(obj, name, fn);
         });
       }
     } else {
@@ -255,7 +380,11 @@ PassiveRedis = (function() {
     var listKey,
       _this = this;
     listKey = this.prepend + this.id + ':' + type;
+    if (next) next.prototype.available = true;
     return this.db.smembers(listKey, function(err, data) {
+      _this.db.quit(function() {
+        return delete _this.db;
+      });
       if (!err) {
         return _this.constructor.factory(data, type, next);
       } else {
@@ -271,7 +400,7 @@ PassiveRedis = (function() {
   PassiveRedis.factory = function(obj, type, fn) {
     var results,
       _this = this;
-    fn = fn.prototype.available ? fn : (function(err, d) {
+    fn = fn && fn.prototype.available ? fn : (function(err, d) {
       return console.log('found this object, but didn\'t have a callback', type, (d.id ? '#' + d.id : d));
     });
     if (obj instanceof Array && !obj.length) return fn(false, []);
@@ -323,7 +452,7 @@ PassiveRedis = (function() {
         }
       });
     } else {
-      return this._findByPointer(this.stringId, true, id, db, function(err, data) {
+      return this._findByPointer(this.stringId, id, db, function(err, data) {
         if (!err) {
           return next(false, data);
         } else {
@@ -342,19 +471,17 @@ PassiveRedis = (function() {
       db = null;
     }
     db = !db ? (require('redis')).createClient() : db;
-    unique = ((_ref = this.pointers[key]) != null ? _ref.unique : void 0) || false;
+    unique = !!((_ref = this.pointers[name]) != null ? _ref.unique : void 0) || name === this.stringId;
     next = function(e, d) {
       db.quit();
       if (fn) return fn(e, d);
     };
     next.prototype.available = !!fn || false;
-    if (!unique) {
-      return db.get(this.name + ':' + name + ':' + this[name], function(err, id) {
+    if (unique) {
+      return db.get(this.name + ':' + name + ':' + value, function(err, id) {
         if (!err) {
           if (id) {
-            return _this.find(id, db, function(err, obj) {
-              if (!err) return _this.factory(obj, _this.name, next);
-            });
+            return _this.find(id, db, next);
           } else {
             return next(false, false);
           }
@@ -363,12 +490,10 @@ PassiveRedis = (function() {
         }
       });
     } else {
-      return db.lrange(this.name + ':' + name + ':' + this[name], 0, -1, function(err, data) {
+      return db.lrange(this.name + ':' + name + ':' + value, 0, -1, function(err, data) {
         if (!err) {
           if (data) {
-            return _this.find(data, db, function(err, obj) {
-              if (!err) return _this.factory(obj, _this.name, next);
-            });
+            return _this.find(data, db, next);
           } else {
             return next(false, false);
           }
