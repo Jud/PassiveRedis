@@ -39,8 +39,12 @@ PassiveRedis = (function() {
       name = arguments[0];
       return Object.defineProperty(_this, name, {
         get: function() {
-          if (_this['get' + (name.charAt(0).toUpperCase() + name.slice(1))]) {
-            return _this['get' + (name.charAt(0).toUpperCase() + name.slice(1))]();
+          var val;
+          if (_this['get' + (name.charAt(0).toUpperCase() + name.slice(1))] && !_this['___' + name + 'Writelock']) {
+            _this['___' + name + 'Writelock'] = true;
+            val = _this['get' + (name.charAt(0).toUpperCase() + name.slice(1))].call(data);
+            delete _this['___' + name + 'Writelock'];
+            return val;
           } else {
             return _this['___' + name];
           }

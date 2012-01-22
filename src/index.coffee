@@ -57,7 +57,13 @@ class PassiveRedis
         # If there is a method called get+Property, then return the
         # value of that function, otherwise, return the value.
         get: =>
-          if @['get' + (name.charAt(0).toUpperCase() + name.slice(1))] then return @['get' + (name.charAt(0).toUpperCase() + name.slice(1))]() else return @['___'+name]
+          if @['get' + (name.charAt(0).toUpperCase() + name.slice(1))] and !@['___'+name+'Writelock']
+            @['___'+name+'Writelock'] = true
+            val = @['get' + (name.charAt(0).toUpperCase() + name.slice(1))].call data
+            delete @['___'+name+'Writelock']
+            return val
+          else
+            return @['___'+name]
 
         # If there is a function called set+Property, then pass the set
         # value to this function. Modify the `changed` object to reflect
