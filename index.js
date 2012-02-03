@@ -23,7 +23,7 @@ PassiveRedis = (function() {
       enumerable: false,
       writable: true
     });
-    Object.defineProperty(this, 'passive', {
+    Object.defineProperty(this, 'events', {
       value: {
         beforeUpdate: [],
         beforeSave: [],
@@ -179,9 +179,6 @@ PassiveRedis = (function() {
           }
           info.id = _this.id;
           return _this.db.hmset(_this.prepend + _this.id, info, function(err, data) {
-            _this.db.quit(function() {
-              return delete _this.db;
-            });
             if (!err) return fn(false, _this);
           });
         } else {
@@ -189,19 +186,19 @@ PassiveRedis = (function() {
         }
       };
       if ((_ref = this.constructor.actions) != null ? _ref.beforeUpdate : void 0) {
-        this.passive.beforeUpdate.push((_ref2 = this.constructor.actions) != null ? _ref2.beforeUpdate : void 0);
+        this.events.beforeUpdate.push((_ref2 = this.constructor.actions) != null ? _ref2.beforeUpdate : void 0);
       }
       error = false;
-      if (!this.passive.beforeUpdate.length) {
+      if (!this.events.beforeUpdate.length) {
         return do_update(false);
       } else {
         _results = [];
-        while (this.passive.beforeUpdate.length) {
-          closure = this.passive.beforeUpdate.pop();
+        while (this.events.beforeUpdate.length) {
+          closure = this.events.beforeUpdate.pop();
           if (!error) {
             _results.push(closure.call(this, function(err) {
               if (!err) {
-                if (!_this.passive.beforeUpdate.length) return do_update(false);
+                if (!_this.events.beforeUpdate.length) return do_update(false);
               } else {
                 error = true;
                 return do_update(true);
@@ -232,7 +229,7 @@ PassiveRedis = (function() {
             if (!err) {
               _this.id = data;
               f = function(err, data) {
-                _this.updateHasMany();
+                _this.updateHasMany('add');
                 if (fn) {
                   return fn(err, data);
                 } else {
@@ -240,18 +237,18 @@ PassiveRedis = (function() {
                 }
               };
               if ((_ref3 = _this.constructor.actions) != null ? _ref3.afterSave : void 0) {
-                _this.passive.afterSave.push((_ref4 = _this.constructor.actions) != null ? _ref4.afterSave : void 0);
+                _this.events.afterSave.push((_ref4 = _this.constructor.actions) != null ? _ref4.afterSave : void 0);
               }
               error = false;
-              if (!_this.passive.afterSave.length) {
+              if (!_this.events.afterSave.length) {
                 return _this.save(f, true);
               } else {
                 _results2 = [];
-                while (_this.passive.afterSave.length) {
-                  closure = _this.passive.afterSave.pop();
+                while (_this.events.afterSave.length) {
+                  closure = _this.events.afterSave.pop();
                   if (!error) {
                     _results2.push(closure.call(_this, function() {
-                      if (!_this.passive.afterSave.length) {
+                      if (!_this.events.afterSave.length) {
                         return _this.save(f, true);
                       }
                     }));
@@ -270,19 +267,19 @@ PassiveRedis = (function() {
         }
       };
       if ((_ref3 = this.constructor.actions) != null ? _ref3.beforeSave : void 0) {
-        this.passive.beforeSave.push((_ref4 = this.constructor.actions) != null ? _ref4.beforeSave : void 0);
+        this.events.beforeSave.push((_ref4 = this.constructor.actions) != null ? _ref4.beforeSave : void 0);
       }
       error = false;
-      if (!this.passive.beforeSave.length) {
+      if (!this.events.beforeSave.length) {
         return do_save(false);
       } else {
         _results2 = [];
-        while (this.passive.beforeSave.length) {
-          closure = this.passive.beforeSave.pop();
+        while (this.events.beforeSave.length) {
+          closure = this.events.beforeSave.pop();
           if (!error) {
             _results2.push(closure.call(this, function(err) {
               if (!err) {
-                if (!_this.passive.beforeSave.length) return do_save(false);
+                if (!_this.events.beforeSave.length) return do_save(false);
               } else {
                 error = true;
                 return do_save(true);
@@ -302,9 +299,6 @@ PassiveRedis = (function() {
     if (this.id) {
       return this.updateHasMany('rem', function() {
         _this.db.del(_this.prepend + _this.id);
-        _this.db.quit(function() {
-          return delete _this.db;
-        });
         return next();
       });
     } else {
@@ -324,18 +318,26 @@ PassiveRedis = (function() {
   };
 
   PassiveRedis.prototype.updateHasMany = function(type, next) {
-    var len, _ref, _ref2,
+    var belongsTo, len, _ref, _ref2,
       _this = this;
-    if (len = (_ref = this.constructor.relationships) != null ? (_ref2 = _ref.belongsTo) != null ? _ref2.length : void 0 : void 0) {
-      return Object.keys(this.constructor.relationships.belongsTo).forEach(function() {
-        var foreignId;
-        if (foreignId = _this[(arguments[0].singularize().toLowerCase()) + 'Id']) {
+    if (((_ref = this.constructor.relationships) != null ? _ref.belongsTo : void 0) && typeof ((_ref2 = this.constructor.relationships) != null ? _ref2.belongsTo : void 0) === 'object') {
+      belongsTo = this.constructor.relationships.belongsTo;
+      len = Object.keys(belongsTo).length;
+      next = next || function() {};
+      return Object.keys(belongsTo).forEach(function() {
+        var classType, foreignId, listKey;
+        classType = (arguments[0].singularize()).toLowerCase();
+        foreignId = _this[classType + 'Id'];
+        listKey = classType + ':' + foreignId + ':' + _this.constructor.name.pluralize().toLowerCase();
+        if (foreignId) {
           if (type === 'add') {
-            _this.db.lpush(arguments[0].singularize() + foreignId + ':' + _this.name, _this.id, function() {});
-            if (!--len) return next();
+            return _this.db.sadd(listKey, _this.id, function() {
+              if (!--len) return next();
+            });
           } else if (type === 'rem') {
-            _this.db.lrem(arguments[0].singularize() + foreignId + ':' + _this.name, 0, _this.id, function() {});
-            if (!--len) return next();
+            return _this.db.srem(listKey, 0, _this.id, function() {
+              if (!--len) return next();
+            });
           }
         }
       });
@@ -364,9 +366,6 @@ PassiveRedis = (function() {
         key = name.charAt(0).toUpperCase() + name.slice(1) + ':' + this[name + 'Id'];
         return this.db.hgetall(key, function(err, obj) {
           var fn;
-          _this.db.quit(function() {
-            return delete _this.db;
-          });
           fn = function(o) {
             this['_' + name] = o;
             return next(false, o);
@@ -383,14 +382,12 @@ PassiveRedis = (function() {
   PassiveRedis.prototype.doHasMany = function(type, params, next) {
     var listKey,
       _this = this;
-    listKey = this.prepend + this.id + ':' + type;
+    listKey = this.prepend.toLowerCase() + this.id + ':' + type.toLowerCase();
     if (next) next.prototype.available = true;
     return this.db.smembers(listKey, function(err, data) {
-      _this.db.quit(function() {
-        return delete _this.db;
-      });
+      type = type.singularize().charAt(0).toUpperCase() + type.singularize().slice(1);
       if (!err) {
-        return _this.constructor.factory(data, type, next);
+        return global[type].find(data, next);
       } else {
         return next(true);
       }
@@ -428,9 +425,8 @@ PassiveRedis = (function() {
       fn = db;
       db = null;
     }
-    if (!db) db = (require('redis')).createClient();
+    if (!db) db = this.db();
     next = function(e, d) {
-      db.quit();
       if (!!fn) return fn(e, d);
     };
     next.prototype.available = !!fn || false;
@@ -474,10 +470,9 @@ PassiveRedis = (function() {
       fn = db;
       db = null;
     }
-    db = !db ? (require('redis')).createClient() : db;
+    db = !db ? this.db() : db;
     unique = !!((_ref = this.pointers[name]) != null ? _ref.unique : void 0) || name === this.stringId;
     next = function(e, d) {
-      db.quit();
       if (fn) return fn(e, d);
     };
     next.prototype.available = !!fn || false;
@@ -524,6 +519,10 @@ PassiveRedis = (function() {
       });
     }
     return next();
+  };
+
+  PassiveRedis.db = function() {
+    return (require('redis')).createClient();
   };
 
   return PassiveRedis;

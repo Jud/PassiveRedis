@@ -31,8 +31,8 @@ class PassiveRedis
     # Setup an instance variable that contains available callbacks
     # like beforeUpdate and beforeSave. Use definePeoperty to keep
     # this from being enumerated.
-    Object.defineProperty @, 'passive',
-      value: 
+    Object.defineProperty @, 'events',
+      value:
         beforeUpdate: []
         beforeSave: []
         afterSave: []
@@ -177,23 +177,21 @@ class PassiveRedis
 
           info.id = @id
           @db.hmset @prepend + @id, info, (err, data) =>
-            @db.quit =>
-              delete @db
             if !err then fn false, @
         else
           fn true
 
-      if @constructor.actions?.beforeUpdate then @passive.beforeUpdate.push @constructor.actions?.beforeUpdate
+      if @constructor.actions?.beforeUpdate then @events.beforeUpdate.push @constructor.actions?.beforeUpdate
       error = false
-      if !@passive.beforeUpdate.length
+      if !@events.beforeUpdate.length
         do_update false
       else
-        while @passive.beforeUpdate.length
-          closure = @passive.beforeUpdate.pop()
+        while @events.beforeUpdate.length
+          closure = @events.beforeUpdate.pop()
           if !error
             closure.call @, (err) =>
               if !err
-                if !@passive.beforeUpdate.length then do_update false
+                if !@events.beforeUpdate.length then do_update false
               else
                 error = true
                 do_update true
@@ -214,39 +212,39 @@ class PassiveRedis
             if !err
               @id = data
               f = (err, data) =>
-                @updateHasMany()
+                @updateHasMany 'add'
                 if fn
                   fn err, data
                 else
                   console.log 'No callback, here\'s the data', err, data
 
-              if @constructor.actions?.afterSave then @passive.afterSave.push @constructor.actions?.afterSave
+              if @constructor.actions?.afterSave then @events.afterSave.push @constructor.actions?.afterSave
               error = false
-              if !@passive.afterSave.length
+              if !@events.afterSave.length
                 @save f, true
               else
-                while @passive.afterSave.length
-                  closure = @passive.afterSave.pop()
+                while @events.afterSave.length
+                  closure = @events.afterSave.pop()
                   if !error
                     closure.call @, =>
-                      if !@passive.afterSave.length then @save f, true
+                      if !@events.afterSave.length then @save f, true
 
             else
               fn true, @
         else
           fn true, @
 
-      if @constructor.actions?.beforeSave then @passive.beforeSave.push @constructor.actions?.beforeSave
+      if @constructor.actions?.beforeSave then @events.beforeSave.push @constructor.actions?.beforeSave
       error = false
-      if !@passive.beforeSave.length
+      if !@events.beforeSave.length
         do_save false
       else
-        while @passive.beforeSave.length
-          closure = @passive.beforeSave.pop()
+        while @events.beforeSave.length
+          closure = @events.beforeSave.pop()
           if !error
             closure.call @, (err) =>
               if !err
-                if !@passive.beforeSave.length then do_save false
+                if !@events.beforeSave.length then do_save false
               else
                 error = true
                 do_save true
@@ -257,8 +255,6 @@ class PassiveRedis
     if @id
       @updateHasMany 'rem', =>
         @db.del @prepend + @id
-        @db.quit =>
-          delete @db
 
         next()
     else
@@ -277,17 +273,26 @@ class PassiveRedis
   # If a model has a belongsTo relationship, then we should update the list
   # of hasMany items it is a part of.
   updateHasMany: (type, next) ->
-    if len = @constructor.relationships?.belongsTo?.length
-      Object.keys(@constructor.relationships.belongsTo).forEach =>
-        if foreignId = @[(arguments[0].singularize().toLowerCase())+'Id']
+    if @constructor.relationships?.belongsTo and typeof @constructor.relationships?.belongsTo is 'object'
+      # Setup the hasMany stuff
+      belongsTo = @constructor.relationships.belongsTo
+      len = Object.keys(belongsTo).length
+      next = next || ->
+
+      # Loop over the keys
+      Object.keys(belongsTo).forEach =>
+        classType = (arguments[0].singularize()).toLowerCase()
+        foreignId = @[(classType+'Id')]
+        listKey = classType+':'+foreignId+':'+@constructor.name.pluralize().toLowerCase()
+        if foreignId
           if type is 'add'
-            @db.lpush arguments[0].singularize() + foreignId + ':' + @name, @id, =>
-            if !--len
-              next()
+            @db.sadd listKey, @id, =>
+              if !--len
+                next()
           else if type is 'rem'
-            @db.lrem arguments[0].singularize() + foreignId + ':' + @name, 0, @id, =>
-            if !--len
-              next()
+            @db.srem listKey, 0, @id, =>
+              if !--len
+                next()
 
   # This is used to keep track of the schema values that have been changed
   # after the model was initialized. Either pass in a property string or
@@ -310,9 +315,6 @@ class PassiveRedis
       else
         key = name.charAt(0).toUpperCase() + name.slice(1) + ':' + @[name+'Id']
         @db.hgetall key, (err, obj) =>
-          @db.quit =>
-            delete @db
-
           # Create Callback that is `available` for the factory
           fn = (o) ->
             @['_'+name] = o
@@ -327,12 +329,11 @@ class PassiveRedis
 
   # Fetch the hasMany relationship specified.
   doHasMany: (type, params, next) ->
-    listKey = @prepend + @id + ':' + type
+    listKey = @prepend.toLowerCase() + @id + ':' + type.toLowerCase()
     if next then next::available = true
     @db.smembers listKey, (err, data) =>
-      @db.quit =>
-        delete @db
-      if !err then @constructor.factory data, type, next else next true
+      type = type.singularize().charAt(0).toUpperCase() + type.singularize().slice(1)
+      if !err then global[type].find data, next else next true
 
   # Instantiate a new instance of the object and save.
   @create: (data, fn) ->
@@ -373,13 +374,11 @@ class PassiveRedis
       db = null
 
     # If a db instance wasn't passed in, we need to create one.
-    if !db
-      db   = (require 'redis').createClient()
+    if !db then db = @db()
 
     # Here, we modify the callback to close the db connection when it is
     # invoked to keep from opening up extra connections to the redis db.
     next = (e, d) =>
-      db.quit()
       if !!fn then fn e, d
 
     # This is used to let the factory know if we actually have a callback
@@ -422,13 +421,12 @@ class PassiveRedis
       fn = db
       db = null
 
-    db = if !db then (require 'redis').createClient() else db
+    db = if !db then @db() else db
     unique = !!@pointers[name]?.unique || name is @stringId
 
     # Set up the next function to automatically close the db connection
     # when it is invoked.
     next = (e, d) =>
-      db.quit()
       if fn then fn e, d
 
     # This is used to determine if `fn` is defined within its creating closure.
@@ -479,6 +477,9 @@ class PassiveRedis
         global[name] = models[name]
 
     next()
+
+  @db: ->
+    return (require 'redis').createClient()
 
 # Export the module
 module.exports = PassiveRedis
