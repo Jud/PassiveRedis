@@ -1,4 +1,5 @@
 inflection   = require './libs/inflection'
+__db         = (require 'redis').createClient()
 
 ## isNumber - The missing js is_numeric.
 # This is used in our find method to determine if someone is looking
@@ -57,13 +58,7 @@ class PassiveRedis
         # If there is a method called get+Property, then return the
         # value of that function, otherwise, return the value.
         get: =>
-          if @['get' + (name.charAt(0).toUpperCase() + name.slice(1))] and !@['___'+name+'Writelock']
-            @['___'+name+'Writelock'] = true
-            val = @['get' + (name.charAt(0).toUpperCase() + name.slice(1))].call data
-            delete @['___'+name+'Writelock']
-            return val
-          else
-            return @['___'+name]
+          if @['get' + (name.charAt(0).toUpperCase() + name.slice(1))] then return @['get' + (name.charAt(0).toUpperCase() + name.slice(1))](@['___'+name]) else return @['___'+name]
 
         # If there is a function called set+Property, then pass the set
         # value to this function. Modify the `changed` object to reflect
@@ -143,11 +138,9 @@ class PassiveRedis
   isConstructed: ->
     !!@__constructed
 
+  # Return a redis instance
   getDb: ->
-    if !@_db
-      @_db = (require 'redis').createClient()
-
-    return @_db
+    return __db
 
   # Save the data in the model. When `force_pointer_update` is set to true,
   # the pointer entry in the db is forced to update, useful when we initially
@@ -392,9 +385,9 @@ class PassiveRedis
       len = id.length
       id.forEach (k) =>
         @find k, db, (err, obj) =>
-          if obj
+          if obj and !err
             results.push obj
-          if !--len then @factory results, @name, next
+          if !--len then next false, results
 
     # If the passed in argument is a number, then find by the numeric id.
     else if isNumber id
@@ -479,7 +472,7 @@ class PassiveRedis
     next()
 
   @db: ->
-    return (require 'redis').createClient()
+    return __db
 
 # Export the module
 module.exports = PassiveRedis

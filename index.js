@@ -1,6 +1,8 @@
-var PassiveRedis, inflection, isNumber;
+var PassiveRedis, inflection, isNumber, __db;
 
 inflection = require('./libs/inflection');
+
+__db = (require('redis')).createClient();
 
 isNumber = function(n) {
   return (!isNaN((parseFloat(n)) && (isFinite(n)))) || typeof n === 'number';
@@ -39,12 +41,8 @@ PassiveRedis = (function() {
       name = arguments[0];
       return Object.defineProperty(_this, name, {
         get: function() {
-          var val;
-          if (_this['get' + (name.charAt(0).toUpperCase() + name.slice(1))] && !_this['___' + name + 'Writelock']) {
-            _this['___' + name + 'Writelock'] = true;
-            val = _this['get' + (name.charAt(0).toUpperCase() + name.slice(1))].call(data);
-            delete _this['___' + name + 'Writelock'];
-            return val;
+          if (_this['get' + (name.charAt(0).toUpperCase() + name.slice(1))]) {
+            return _this['get' + (name.charAt(0).toUpperCase() + name.slice(1))](_this['___' + name]);
           } else {
             return _this['___' + name];
           }
@@ -139,8 +137,7 @@ PassiveRedis = (function() {
   };
 
   PassiveRedis.prototype.getDb = function() {
-    if (!this._db) this._db = (require('redis')).createClient();
-    return this._db;
+    return __db;
   };
 
   PassiveRedis.prototype.save = function(fn, force_pointer_update) {
@@ -435,8 +432,8 @@ PassiveRedis = (function() {
       len = id.length;
       return id.forEach(function(k) {
         return _this.find(k, db, function(err, obj) {
-          if (obj) results.push(obj);
-          if (!--len) return _this.factory(results, _this.name, next);
+          if (obj && !err) results.push(obj);
+          if (!--len) return next(false, results);
         });
       });
     } else if (isNumber(id)) {
@@ -522,7 +519,7 @@ PassiveRedis = (function() {
   };
 
   PassiveRedis.db = function() {
-    return (require('redis')).createClient();
+    return __db;
   };
 
   return PassiveRedis;
