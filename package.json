@@ -1,4 +1,4 @@
-{   
+{
   "name" : "PassiveRedis",
   "version" : "0.0.6",
   "description" : "Node ORM for Redis",
@@ -10,8 +10,8 @@
       "type": "git",
       "url": "https://github.com/Jud/PassiveRedis.git"
   },
-  scripts: {
-    test: "make tests"
+  "scripts": {
+    "test": "make tests"
   },
   "dependencies": {
     "hiredis": ">=0.1.0",
