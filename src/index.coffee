@@ -1,5 +1,5 @@
 inflection   = require './libs/inflection'
-__db         = (require 'redis').createClient()
+__db         = (require 'redis').createClient(6379, 'localhost')
 
 ## isNumber - The missing js is_numeric.
 # This is used in our find method to determine if someone is looking

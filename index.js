@@ -2,7 +2,7 @@ var PassiveRedis, inflection, isNumber, __db;
 
 inflection = require('./libs/inflection');
 
-__db = (require('redis')).createClient();
+__db = (require('redis')).createClient(6379, 'localhost');
 
 isNumber = function(n) {
   return (!isNaN((parseFloat(n)) && (isFinite(n)))) || typeof n === 'number';
