@@ -1,7 +1,9 @@
 PassiveRedis = require '../'
 
 describe 'Passive Redis ORM', ->
-  it 'Should pass a sanity check', (done)
+  it 'Should pass a sanity check', (done) ->
+    (typeof noVal).should.equal 'undefined'
+
   it 'Should load all models', (done) ->
     PassiveRedis.loadModels (require './models'), ->
       # These two models should be loaded
