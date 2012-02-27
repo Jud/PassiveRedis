@@ -1,5 +1,5 @@
 tests:
-		@/usr/local/bin/mocha \
+		@mocha \
 			--reporter spec \
 			--globals User,Cog \
 			--require should

@@ -20,5 +20,5 @@ describe 'Passive Redis ORM', ->
 
   it 'Should have hasOne Relationship', (done) ->
     cog = new Cog
-    (typeof cog).should.equal 'function'
+    (typeof cog.user).should.equal 'function'
     done()
