@@ -21,7 +21,7 @@ PassiveRedis = (function() {
       writable: true
     });
     Object.defineProperty(this, '__constructed', {
-      value: data.id ? false : true,
+      value: data && data.id ? false : true,
       enumerable: false,
       writable: true
     });
@@ -101,8 +101,8 @@ PassiveRedis = (function() {
           };
         });
       }
-      if (rel.hasManyAndBelongsToMany) {
-        Object.keys(rel.hasManyAndBelongsToMany).forEach(function() {
+      if (rel.hasAndBelongsToMany) {
+        Object.keys(rel.hasAndBelongsToMany).forEach(function() {
           var name;
           name = arguments[0];
           return _this[name] = function() {
@@ -351,7 +351,7 @@ PassiveRedis = (function() {
 
   PassiveRedis.prototype.updateHasMany = function(type, next) {
     var listLength, lists, _ref, _ref2;
-    lists = [(_ref = this.constructor.relationships) != null ? _ref.belongsTo : void 0, (_ref2 = this.constructor.relationships) != null ? _ref2.hasManyAndBelongsToMany : void 0];
+    lists = [(_ref = this.constructor.relationships) != null ? _ref.belongsTo : void 0, (_ref2 = this.constructor.relationships) != null ? _ref2.hasAndBelongsToMany : void 0];
     listLength = lists.length;
     return lists.forEach(function(el) {
       var len,

@@ -25,7 +25,7 @@ class PassiveRedis
     # `data` variable will be marked as `changed` when assigned
     # to this instance of the object.
     Object.defineProperty @, '__constructed',
-      value: if data.id then false else true
+      value: if data and data.id then false else true
       enumerable: false
       writable: true
 
@@ -105,8 +105,8 @@ class PassiveRedis
 
             @doHasMany.apply @, [name, args, fn]
 
-      if rel.hasManyAndBelongsToMany
-        Object.keys(rel.hasManyAndBelongsToMany).forEach =>
+      if rel.hasAndBelongsToMany
+        Object.keys(rel.hasAndBelongsToMany).forEach =>
           name = arguments[0]
           @[name] = =>
             args = []
@@ -324,7 +324,7 @@ class PassiveRedis
   # If a model has a belongsTo relationship, then we should update the list
   # of hasMany items it is a part of.
   updateHasMany: (type, next) ->
-    lists = [@constructor.relationships?.belongsTo, @constructor.relationships?.hasManyAndBelongsToMany]
+    lists = [@constructor.relationships?.belongsTo, @constructor.relationships?.hasAndBelongsToMany]
     listLength = lists.length
     lists.forEach (el) ->
       if el and typeof el is 'object'
