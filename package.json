@@ -10,16 +10,16 @@
       "type": "git",
       "url": "https://github.com/Jud/PassiveRedis.git"
   },
-  "scripts": {
-    "test": "make tests"
+  "devDependencies": {
+    "mocha": "*",
+    "should": "*",
+    "coffee-script": "*"
   },
   "dependencies": {
     "hiredis": ">=0.1.0",
     "redis": ">=0.6.0"
   },
-  "devDependencies": {
-    "coffee-script": "*",
-    "mocha": "*",
-    "should": "*"
+  "scripts": {
+    "test": "make tests"
   }
 }
