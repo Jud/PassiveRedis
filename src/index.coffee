@@ -1,6 +1,8 @@
 inflection   = require './libs/inflection'
 __db         = (require 'redis').createClient()
 
+if process.env.TESTING is 'true' then __db.select(1)
+
 ## isNumber - The missing js is_numeric.
 # This is used in our find method to determine if someone is looking
 # up by id or by string.
@@ -195,7 +197,7 @@ class PassiveRedis
 
           info.id = @id
           @db.hmset @prepend + @id, info, (err, data) =>
-            if !err then fn false, @
+            if !err then fn null, @
         else
           fn true
 

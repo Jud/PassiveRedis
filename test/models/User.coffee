@@ -25,10 +25,9 @@ class User extends PassiveRedis
     beforeUpdate: (next)->
       if @isChanged 'password'
         crypto    = require 'crypto'
-        @password = crypto.createHash('md5').update('testing').digest("hex")
+        @password = crypto.createHash('md5').update(@password).digest("hex")
 
-      else
-        next false
+      next false
 
     beforeSave: (next) ->
       # Now generate an API key and secret for this user

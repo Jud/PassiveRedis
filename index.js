@@ -4,6 +4,8 @@ inflection = require('./libs/inflection');
 
 __db = (require('redis')).createClient();
 
+if (process.env.TESTING === 'true') __db.select(1);
+
 isNumber = function(n) {
   return (!isNaN((parseFloat(n)) && (isFinite(n)))) || typeof n === 'number';
 };
@@ -206,7 +208,7 @@ PassiveRedis = (function() {
           }
           info.id = _this.id;
           return _this.db.hmset(_this.prepend + _this.id, info, function(err, data) {
-            if (!err) return fn(false, _this);
+            if (!err) return fn(null, _this);
           });
         } else {
           return fn(true);
