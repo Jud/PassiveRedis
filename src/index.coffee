@@ -181,7 +181,7 @@ class PassiveRedis
         # Loop over the schema defined in the model and ONLY push the defined values
         # into the object that will be inserted into the db.
         Object.keys(@constructor.schema).forEach =>
-          if @constructor.schema[arguments[0]].required and !@[arguments[0]]? then error = true else info[arguments[0]] = @[arguments[0]]
+          if !@[arguments[0]]? and @constructor.schema[arguments[0]]?.required isnt false then error = true else info[arguments[0]] = @[arguments[0]]
           if !@[arguments[0]]? and @constructor.schema[arguments[0]].hasOwnProperty 'default' then info[arguments[0]] = @constructor.schema[arguments[0]].default
 
         # If we are missing required fields, then return.
@@ -230,7 +230,7 @@ class PassiveRedis
         # Loop over the schema defined in the model and ONLY push the defined values
         # into the object that will be inserted into the db.
         Object.keys(@constructor.schema).forEach =>
-          if @constructor.schema[arguments[0]].required and !@[arguments[0]]? then error = true else info[arguments[0]] = @[arguments[0]]
+          if !@[arguments[0]]? and @constructor.schema[arguments[0]]?.required isnt false then error = true else info[arguments[0]] = @[arguments[0]]
           if !@[arguments[0]]? and @constructor.schema[arguments[0]].hasOwnProperty 'default' then info[arguments[0]] = @constructor.schema[arguments[0]].default
 
         # If we are missing required fields, then return.
