@@ -1,4 +1,4 @@
-inflection   = require './libs/inflection'
+inflection   = require '../libs/inflection'
 __db         = (require 'redis').createClient()
 
 if process.env.TESTING is 'true' then __db.select(1)
@@ -328,7 +328,8 @@ class PassiveRedis
   updateHasMany: (type, next) ->
     lists = [@constructor.relationships?.belongsTo, @constructor.relationships?.hasAndBelongsToMany]
     listLength = lists.length
-    lists.forEach (el) ->
+    console.log lists
+    lists.forEach (el) =>
       if el and typeof el is 'object'
         # Setup the hasMany stuff
         len = Object.keys(el).length
@@ -441,11 +442,14 @@ class PassiveRedis
     if id instanceof Array
       results = []
       len = id.length
-      id.forEach (k) =>
-        @find k, (err, obj) =>
-          if obj and !err
-            results.push obj
-          if !--len then next false, results
+      if len
+        id.forEach (k) =>
+          @find k, (err, obj) =>
+            if obj and !err
+              results.push obj
+            if !--len then next false, results
+      else
+        next false, []
 
     # If the passed in argument is a number, then find by the numeric id.
     else if isNumber id
