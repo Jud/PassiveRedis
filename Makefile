@@ -1,5 +1,5 @@
 tests:
 	@TESTING=true mocha \
 		--reporter spec \
-		--globals User,Cog \
+		--globals __PassiveRedis \
 		--require should

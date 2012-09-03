@@ -1,6 +1,6 @@
 inflection   = require '../libs/inflection'
 __db         = (require 'redis').createClient()
-
+SEPARATOR    = ':'
 if process.env.TESTING is 'true' then __db.select(1)
 
 ## isNumber - The missing js is_numeric.
@@ -19,7 +19,7 @@ class PassiveRedis
   # if you were to call the hasMany or hasOne method names.
   constructor: (data, @db=false, @changed={}) ->
     Object.defineProperty @, 'prepend',
-      value: @constructor.name + ':'
+      value: @constructor.name + SEPARATOR
       enumerable: false
       writable: true
 
@@ -30,6 +30,10 @@ class PassiveRedis
       value: if data and data.id then false else true
       enumerable: false
       writable: true
+
+    # Make sure that ids are always ints
+    if data and data.id
+      data.id = parseInt(data.id, 10)
 
     # Setup an instance variable that contains available callbacks
     # like beforeUpdate and beforeSave. Use definePeoperty to keep
@@ -60,7 +64,14 @@ class PassiveRedis
         # If there is a method called get+Property, then return the
         # value of that function, otherwise, return the value.
         get: =>
-          if @['get' + (name.charAt(0).toUpperCase() + name.slice(1))] then return @['get' + (name.charAt(0).toUpperCase() + name.slice(1))](@['___'+name]) else return @['___'+name]
+          if @['get' + (name.charAt(0).toUpperCase() + name.slice(1))] and !@isSaving() and @isConstructed()
+            @['get' + (name.charAt(0).toUpperCase() + name.slice(1))](@['___'+name])
+          else
+            # An exception
+            if name is 'db'
+              @['get' + (name.charAt(0).toUpperCase() + name.slice(1))](@['___'+name])
+            else
+              @['___'+name]
 
         # If there is a function called set+Property, then pass the set
         # value to this function. Modify the `changed` object to reflect
@@ -165,6 +176,10 @@ class PassiveRedis
   isConstructed: ->
     !!@__constructed
 
+  # Return a boolean if the model has been constructed.
+  isSaving: ->
+    !!@__saving
+
   # Return a redis instance
   getDb: ->
     return __db
@@ -173,6 +188,21 @@ class PassiveRedis
   # the pointer entry in the db is forced to update, useful when we initially
   # save an item and then need to update the pointer.
   save: (fn, force_pointer_update=false) ->
+    Object.defineProperty @, '__saving',
+      value: true
+      enumerable: false
+      writable: true
+
+    # Turn off saving when the callback is called
+    _fn = (err, val) =>
+      Object.defineProperty @, '__saving',
+        value: false
+        enumerable: false
+        writable: true
+
+      if fn
+        fn err, val
+
     info = {}
     error = false
 
@@ -185,7 +215,7 @@ class PassiveRedis
           if !@[arguments[0]]? and @constructor.schema[arguments[0]].hasOwnProperty 'default' then info[arguments[0]] = @constructor.schema[arguments[0]].default
 
         # If we are missing required fields, then return.
-        if error then return fn true
+        if error then return _fn true
 
         if !err
           # Update the StringId and other pointers
@@ -197,9 +227,9 @@ class PassiveRedis
 
           info.id = @id
           @db.hmset @prepend + @id, info, (err, data) =>
-            if !err then fn null, @
+            if !err then _fn null, @
         else
-          fn true
+          _fn true
 
       if @constructor.actions?.beforeUpdate then @events.beforeUpdate.push @constructor.actions?.beforeUpdate
 
@@ -234,7 +264,7 @@ class PassiveRedis
           if !@[arguments[0]]? and @constructor.schema[arguments[0]].hasOwnProperty 'default' then info[arguments[0]] = @constructor.schema[arguments[0]].default
 
         # If we are missing required fields, then return.
-        if error then return fn true
+        if error then return _fn true
 
         if !err
           @db.incr @prepend + '__incr', (err, data) =>
@@ -242,8 +272,8 @@ class PassiveRedis
               @id = data
               f = (err, data) =>
                 @updateHasMany 'add'
-                if fn
-                  fn err, data
+                if _fn
+                  _fn err, data
                 else
                   console.log 'No callback, here\'s the data', err, data
 
@@ -268,15 +298,15 @@ class PassiveRedis
                         do_queue()
                     else
                       @events.afterSave = afterSave
-                      fn true
+                      _fn true
 
                 # Start the queue
                 do_queue()
 
             else
-              fn true
+              _fn true
         else
-          fn true
+          _fn true
 
       if @constructor.actions?.beforeSave then @events.beforeSave.push @constructor.actions?.beforeSave
 
@@ -308,49 +338,98 @@ class PassiveRedis
     if @id
       @updateHasMany 'rem', =>
         @db.del @prepend + @id
+        @removePointers()
 
         next()
     else
       return next()
 
+  removePointers: ->
+    if @constructor.pointers
+      keys = @constructor.pointers
+      if @constructor.stringId then keys[@constructor.stringId] = {unique: true}
+
+      Object.keys(@constructor.pointers).forEach (el) =>
+        Object.defineProperty @, '__saving',
+          value: true
+          enumerable: false
+          writable: true
+        key = @prepend+el+SEPARATOR+@[el]
+        Object.defineProperty @, '__saving',
+          value: false
+          enumerable: false
+          writable: true
+        if @constructor.pointers[el]?.unique
+          @db.del key
+        else
+          @db.lrem key, 0, @id, (err, len) =>
+
   # Update entries that allow us to search for objects by other unique id's,
   # such as the stringId.
   updatePointers: (name, oldVal, newVal, unique=true) ->
     if unique
-      @db.del @prepend + name + ':' + oldVal
-      @db.set @prepend + name + ':' + newVal, @id
+      @db.del @prepend + name + SEPARATOR + oldVal
+      @db.set @prepend + name + SEPARATOR + newVal, @id
     else
-      @db.lrem @prepend + name + ':' + oldVal, 0, @id
-      @db.lpush @prepend + name + ':' + newVal, @id
+      @db.lrem @prepend + name + SEPARATOR + oldVal, 0, @id
+      @db.lpush @prepend + name + SEPARATOR + newVal, @id
 
   # If a model has a belongsTo relationship, then we should update the list
   # of hasMany items it is a part of.
   updateHasMany: (type, next) ->
-    lists = [@constructor.relationships?.belongsTo, @constructor.relationships?.hasAndBelongsToMany]
-    listLength = lists.length
-    console.log lists
-    lists.forEach (el) =>
-      if el and typeof el is 'object'
-        # Setup the hasMany stuff
-        len = Object.keys(el).length
-        next = next || ->
+    # Figure out what needs updating
+    belongsToLists = []
+    if @constructor.relationships?.belongsTo then belongsToLists.push @constructor.relationships?.belongsTo
+    if @constructor.relationships?.hasAndBelongsToMany then belongsToLists.push @constructor.relationships?.hasAndBelongsToMany
 
-        # Loop over the keys
-        Object.keys(el).forEach =>
-          classType = if el[arguments[0]]?.type then el[arguments[0]].type.toLowerCase() else (arguments[0].singularize()).toLowerCase()
-          foreignId = if el[arguments[0]]?.name then @[(el[arguments[0]].name)] else @[(classType+'Id')]
-          listKey = classType+':'+foreignId+':'+@constructor.name.pluralize().toLowerCase()
-          if foreignId
-            if type is 'add'
-              @db.sadd listKey, @id, =>
-                if !--len
-                  if !--listLength
-                    next()
-            else if type is 'rem'
-              @db.srem listKey, 0, @id, =>
-                if !--len
-                  if !--listLength
-                    next()
+    hasManyLists = []
+    if @constructor.relationships?.hasMany then hasManyLists.push @constructor.relationships?.hasMany
+
+    listLength = belongsToLists.length + hasManyLists.length
+    belongsToLists.forEach (el) =>
+      # Setup the hasMany stuff
+      len = Object.keys(el).length
+      next = next || ->
+
+      # Loop over the keys
+      Object.keys(el).forEach =>
+        classType = if el[arguments[0]]?.type then el[arguments[0]].type.toLowerCase() else (arguments[0].singularize()).toLowerCase()
+        foreignId = if el[arguments[0]]?.name then @[(el[arguments[0]].name)] else @[(classType+'Id')]
+        listKey = classType+SEPARATOR+foreignId+SEPARATOR+@constructor.name.pluralize().toLowerCase()
+        if foreignId
+          if type is 'add'
+            @db.sadd listKey, @id, =>
+              if !--len
+                if !--listLength
+                  next()
+          else if type is 'rem'
+            @db.srem listKey, 0, @id, =>
+              if !--len
+                if !--listLength
+                  next()
+
+    hasManyLists.forEach (el) =>
+      # Setup the hasMany stuff
+      len = Object.keys(el).length
+      next = next || ->
+
+      # Loop over the keys
+      Object.keys(el).forEach =>
+        classType = if el[arguments[0]]?.type then el[arguments[0]].type.toLowerCase() else (arguments[0].singularize()).toLowerCase()
+        listKey = @constructor.name.singularize().toLowerCase() + SEPARATOR + @id + SEPARATOR + classType.pluralize()
+
+        if type is 'rem'
+          @[classType.pluralize()] (err, objs) ->
+            objsLen = objs.length
+            if objsLen
+              objs.forEach (obj) ->
+                obj.destroy ->
+                  # Nothing
+
+          @db.del listKey, =>
+            if !--len
+              if !--listLength
+                next()
 
   # This is used to keep track of the schema values that have been changed
   # after the model was initialized. Either pass in a property string or
@@ -371,12 +450,12 @@ class PassiveRedis
       if @['_'+opts.name]
         return next false, @['_'+opts.name]
       else
-        key = opts.type.charAt(0).toUpperCase() + opts.type.slice(1) + ':' + @[opts.name+'Id']
+        key = opts.type.charAt(0).toUpperCase() + opts.type.slice(1) + SEPARATOR + @[opts.name+'Id']
         @db.hgetall key, (err, obj) =>
           # Create Callback that is `available` for the factory
-          fn = (o) ->
+          fn = (err, o) =>
             @['_'+opts.name] = o
-            return next false, o
+            return next err, o
 
           fn::available = true
 
@@ -387,11 +466,11 @@ class PassiveRedis
 
   # Fetch the hasMany relationship specified.
   doHasMany: (type, params, next) ->
-    listKey = @prepend.toLowerCase() + @id + ':' + type.toLowerCase()
+    listKey = @prepend.toLowerCase() + @id + SEPARATOR + type.toLowerCase()
     if next then next::available = true
     @db.smembers listKey, (err, data) =>
       type = type.singularize().charAt(0).toUpperCase() + type.singularize().slice(1)
-      if !err then global[type].find data, next else next true
+      if !err then global.__PassiveRedis[type].find data, next else next true
 
   # Instantiate a new instance of the object and save.
   @create: (data, fn) ->
@@ -415,11 +494,11 @@ class PassiveRedis
     results = []
     if obj instanceof Array
       obj.forEach (o) =>
-        results.push new @ o
+        results.push new global.__PassiveRedis[(type.charAt(0).toUpperCase() + type.slice(1))] o
 
       fn false, results
     else
-      fn false, new @ obj
+      fn false, new global.__PassiveRedis[(type.charAt(0).toUpperCase() + type.slice(1))] obj
 
   # The find function allow us to find a model by numeric id (default) or
   # stringId if the passed in argument is a string and the specified model
@@ -454,7 +533,7 @@ class PassiveRedis
     # If the passed in argument is a number, then find by the numeric id.
     else if isNumber id
       # find by numeric key
-      db.hgetall @name + ':' + id, (err, obj) =>
+      db.hgetall @name + SEPARATOR + id, (err, obj) =>
         if !err
           if Object.keys(obj).length
             @factory obj, @name, next
@@ -482,7 +561,7 @@ class PassiveRedis
     next::available = !!fn or false
 
     if unique
-      db.get @name + ':' + name + ':' + value, (err, id) =>
+      db.get @name + SEPARATOR + name + SEPARATOR + value, (err, id) =>
 
         # If there was no error
         if !err
@@ -499,7 +578,7 @@ class PassiveRedis
           next true
     else
       # Return all of the items on the list
-      db.lrange @name + ':' + name + ':' + value, 0, -1, (err, data) =>
+      db.lrange @name + SEPARATOR + name + SEPARATOR + value, 0, -1, (err, data) =>
         if !err
           if data
             @find data, next
@@ -513,6 +592,8 @@ class PassiveRedis
   # scope, otherwise dynamic name construction won't work. This method loads
   # the classes into the global scope.
   @loadModels: (models, next) ->
+    global.__PassiveRedis = {}
+
     # If a relative path is passed in
     if models
       Object.keys(models).forEach (name) =>
@@ -523,7 +604,7 @@ class PassiveRedis
             models[name]['findBy' + (key.charAt(0).toUpperCase() + key.slice(1))] = (value, fn) ->
               @_findByPointer key, value, fn
 
-        global[name] = models[name]
+        global.__PassiveRedis[name] = models[name]
 
     next()
 

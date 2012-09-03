@@ -6,10 +6,14 @@ class User extends PassiveRedis
   @pointers:
     key:
       unique: true
+    name:
+      unique: false
 
   @schema:
     email:
       required: true
+    name:
+      required: false
     password:
       required: true
     key:
@@ -20,6 +24,10 @@ class User extends PassiveRedis
   @relationships:
     hasMany:
       cogs: {}
+
+
+  getName: (curvalue) ->
+    curvalue+'heyoo'
 
   @actions:
     beforeUpdate: (next)->
