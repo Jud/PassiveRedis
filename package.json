@@ -1,6 +1,6 @@
 {
   "name" : "PassiveRedis",
-  "version" : "0.0.6",
+  "version" : "0.0.8",
   "description" : "Node ORM for Redis",
   "homepage" : "https://github.com/Jud/PassiveRedis",
   "keywords" : [ "ORM", "Redis", "Redis ORM", "Passive", "ActiveRecord" ],
